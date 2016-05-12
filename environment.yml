@@ -1,0 +1,11 @@
+name: ims_simulator
+dependencies:
+  - python=2.7
+  - pip
+  - numpy=1.10
+  - cffi
+  - scipy
+  - toolz
+  - dask
+  - pip:
+    - cpyImagingMSpec
