@@ -1,4 +1,9 @@
 name: ims_simulator
+
+channels:
+  # TODO: create alexandrovteam account on Anaconda.org and move stuff there
+  - lomereiter # for ims cmdline tool
+
 dependencies:
   - python=2.7
   - pip
@@ -7,5 +12,6 @@ dependencies:
   - scipy
   - toolz
   - dask
+  - ims-cpp=0.1
   - pip:
-    - cpyImagingMSpec
+    - cpyImagingMSpec==0.0.4
