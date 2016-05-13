@@ -6,12 +6,19 @@ channels:
 
 dependencies:
   - python=2.7
+  - git
   - pip
   - numpy=1.10
-  - cffi
+  - cffi=1.5.2
   - scipy
   - toolz
   - dask
+  - pandas
+  - lxml
   - ims-cpp=0.1
   - pip:
     - cpyImagingMSpec==0.0.4
+    - cpyMSpec==0.1.4
+    - pyMSpec==0.1
+    - wheezy.template
+    - git+https://github.com/alexandrovteam/pyimzML.git@494f52e1519fcf820bf89f19f28344ddea45d3cf # TODO: package on PyPI

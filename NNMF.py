@@ -130,5 +130,5 @@ H_full = nnls_frob(arr.reshape((arr.shape[0], -1)).T,
                    arr_pos.reshape((arr_pos.shape[0], -1))[cols, :].T)
 
 with open(args.output, "w+") as f:
-    np.savez_compressed(f, W=W, H=H_full, mz_axis=mz_axis)
+    np.savez_compressed(f, W=W, H=H_full, mz_axis=mz_axis, shape=(imzb.height, imzb.width))
     print "Saved NMF to {} (use numpy.load to read it)".format(args.output)

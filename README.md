@@ -12,8 +12,8 @@ Scripts for simulating high-resolution imaging mass spectrometry datasets.
 
 1. Run `ims convert <real.imzML> <real.imzb>` to get an m/z-sorted file in an internal format
 2. Run NNMF.py script to produce a numpy-readable NMF factorization from `<real.imzb>`
-3. TODO
-4. TODO
+3. Run assignMolecules.py script to assign some molecules to the peaks from NMF factorization
+4. Run simulate.py to generate an output .imzML from the layers produced in the previous step
 
 # License
 
