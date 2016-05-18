@@ -6,6 +6,8 @@ import numpy as np
 import cPickle
 import argparse
 
+np.random.seed(42)  # for reproducibility / debugging
+
 parser = argparse.ArgumentParser(description="simulate a dataset from layers")
 parser.add_argument('input', type=str, help="input file produced by assignMolecules.py")
 parser.add_argument('output', type=str, help="output filename (centroided .imzML)")

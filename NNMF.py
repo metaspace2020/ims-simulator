@@ -53,8 +53,8 @@ def get_mz_images(mz_axis_chunk):
     for n, (mz, ppm) in enumerate(mz_axis_chunk):
         img = imzb.get_mz_image(mz, ppm)
         img[img < 0] = 0
-        # perc = np.percentile(img, 99)
-        # img[img > perc] = perc
+        perc = np.percentile(img, 99)
+        img[img > perc] = perc
         imgs[n, :, :] = img
     return imgs
 
