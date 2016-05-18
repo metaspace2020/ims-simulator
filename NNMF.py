@@ -120,6 +120,10 @@ while len(cols) < r:
     H = nnls_frob(x, x[:, cols])
     R = x - da.dot(x[:, cols], da.from_array(H, H.shape))
 
+    if len(cols) > 0 and len(cols) % 5 == 0:
+        residual_error = da.vnorm(R, 'fro').compute() / da.vnorm(x, 'fro').compute()
+        print "relative error is", residual_error
+
 W = np.array(x[:, cols])
 
 residual_error = da.vnorm(R, 'fro').compute() / da.vnorm(x, 'fro').compute()
@@ -129,6 +133,43 @@ print "Projecting all m/z bin images on the obtained basis..."
 H_full = nnls_frob(arr.reshape((arr.shape[0], -1)).T,
                    arr_pos.reshape((arr_pos.shape[0], -1))[cols, :].T)
 
+print "Computing noise statistics..."
+noise_stats = {'prob': [], 'sqrt_median': [], 'sqrt_std': []}
+percent_complete = 5.0
+
+min_intensities = np.zeros((imzb.height, imzb.width))
+min_intensities[:] = np.inf
+
+for i, (mz, ppm) in enumerate(mz_axis):
+    orig_img = imzb.get_mz_image(mz, ppm)
+    orig_img[orig_img < 0] = 0
+    approx_img = W.dot(H_full[:, i]).reshape((imzb.height, imzb.width))
+    diff = orig_img - approx_img
+    noise = diff[diff > 0]
+
+    mask = orig_img > 0
+    min_intensities[mask] = np.minimum(min_intensities[mask], orig_img[mask])
+
+    noise_prob = float(len(noise)) / (imzb.width * imzb.height)
+
+    noise_stats['prob'].append(noise_prob)
+
+    if noise_prob > 0:
+        noise = np.sqrt(noise)
+        noise_stats['sqrt_median'].append(np.median(noise))
+        noise_stats['sqrt_std'].append(np.std(noise))
+    else:
+        noise_stats['sqrt_median'].append(0)
+        noise_stats['sqrt_std'].append(0)
+    if float(i + 1) / len(mz_axis) * 100.0 > percent_complete:
+        print "{}% done".format(percent_complete)
+        percent_complete += 5
+print "100% done"
+
 with open(args.output, "w+") as f:
-    np.savez_compressed(f, W=W, H=H_full, mz_axis=mz_axis, shape=(imzb.height, imzb.width))
-    print "Saved NMF to {} (use numpy.load to read it)".format(args.output)
+    np.savez_compressed(f, W=W, H=H_full, mz_axis=mz_axis, shape=(imzb.height, imzb.width),
+                        noise_prob=np.array(noise_stats['prob']),
+                        noise_sqrt_avg=np.array(noise_stats['sqrt_median']),
+                        noise_sqrt_std=np.array(noise_stats['sqrt_std']),
+                        min_intensities=min_intensities)
+    print "Saved NMF and noise stats to {} (use numpy.load to read it)".format(args.output)
