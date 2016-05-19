@@ -2,8 +2,9 @@ import luigi
 
 import pandas as pd
 
-from os.path import splitext, basename
+from os.path import splitext, basename, expanduser
 import subprocess
+import json
 
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
@@ -157,20 +158,20 @@ class ComputeFDR(luigi.Task):
             subprocess.check_call(cmd, stdout=f, stderr=subprocess.STDOUT)
 
 class RunFullPipeline(luigi.WrapperTask):
-    imzml_fn = luigi.Parameter()
-    sum_formulas_fn = luigi.Parameter()
-    adducts = AdductListParameter()
-    instrument = luigi.Parameter()
-    resolution = luigi.IntParameter()
+    config_fn = luigi.Parameter()
 
     def requires(self):
-        imzml = self.imzml_fn
-        instrument = {'type': self.instrument, 'res200': self.resolution}
-        db = {
-            'sum_formulas_fn': self.sum_formulas_fn,
-            'adducts': self.adducts,
-            'is_decoy': False
-        }
+        with open(self.config_fn) as conf:
+            self.config = json.load(conf)
+
+        imzml = expanduser(self.config['imzml'])
+        instrument = self.config['instrument']
+        db = self.config['database']
+        db['sum_formulas_fn'] = expanduser(db['sum_formulas'])
+        db['is_decoy'] = False
 
         return [ComputeFDR(imzml, instrument, db, adduct)
-                for adduct in self.adducts]
+                for adduct in db['adducts']]
+
+if __name__ == '__main__':
+    luigi.run()

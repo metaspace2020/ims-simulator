@@ -1,0 +1,13 @@
+{
+    "instrument": {
+        "type": "fticr",
+        "res200": 250000
+    },
+
+    "imzml": "~/metabolomics/14_04_29_Regenwurm_pos_centroid.imzML",
+
+    "database": {
+        "sum_formulas": "~/metabolomics/chebi_metabolites.txt",
+        "adducts": ["+H", "+K", "+Na"]
+    }
+}
