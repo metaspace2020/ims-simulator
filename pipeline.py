@@ -18,15 +18,19 @@ class AdductListParameter(luigi.Parameter):
     def parse(self, arguments):
         return tuple(arguments.split(','))
 
+def get_id(obj):
+    return str(abs(hash(obj)))[:8]
+
 class CreateIsotopeDB(luigi.Task):
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
 
     def _output_filename(self):
         db_name = splitext(basename(self.molecular_db['sum_formulas_fn']))[0]
-        fn = "{}_{}_{}.db".format(db_name,
-                                  self.instrument['type'],
-                                  self.instrument['res200'])
+        fn = "{}_{}_{}_{}.db".format(db_name,
+                                     self.instrument['type'],
+                                     self.instrument['res200'],
+                                     get_id(self.molecular_db))
         if self.molecular_db['is_decoy']:
             fn += ".decoy"
         return fn
@@ -69,7 +73,8 @@ class RunAnnotation(luigi.Task):
         }
 
     def _output_filename(self):
-        db_id = 'decoy' if self.molecular_db['is_decoy'] else 'target'
+        db_id = get_id(self.molecular_db) + "."
+        db_id += 'decoy' if self.molecular_db['is_decoy'] else 'target'
         return splitext(basename(self.imzml_fn))[0] + ".results." + db_id
 
     def output(self):
@@ -122,7 +127,7 @@ class ComputeFDR(luigi.Task):
         }
 
     def _output_filename(self):
-        prefix = splitext(basename(self.imzml_fn))[0]
+        prefix = splitext(self.input()['decoy_results'].fn)[0] + "_" + get_id(self.molecular_db)
         if self.adduct:
             return prefix + "_" + self.adduct + ".fdr"
         else:
@@ -136,14 +141,14 @@ class ComputeFDR(luigi.Task):
             if adduct in DECOY_ADDUCTS:
                 result.remove(adduct)
 
-        return list(result)
+        return tuple(list(result))
 
     def _decoy_molecular_db(self):
-        return {
-            'sum_formulas_fn': self.molecular_db['sum_formulas_fn'],
-            'adducts': self._decoy_adducts(),
-            'is_decoy': True
-        }
+        return luigi.parameter.FrozenOrderedDict([
+            ('sum_formulas_fn', self.molecular_db['sum_formulas_fn']),
+            ('adducts', self._decoy_adducts()),
+            ('is_decoy', True)
+        ])
 
     def output(self):
         return luigi.LocalTarget(self._output_filename())
@@ -158,20 +163,28 @@ class ComputeFDR(luigi.Task):
             subprocess.check_call(cmd, stdout=f, stderr=subprocess.STDOUT)
 
 class RunFullPipeline(luigi.WrapperTask):
-    config_fn = luigi.Parameter()
+    config = luigi.DictParameter()
 
     def requires(self):
-        with open(self.config_fn) as conf:
-            self.config = json.load(conf)
-
-        imzml = expanduser(self.config['imzml'])
+        imzml = self.config['imzml']
         instrument = self.config['instrument']
         db = self.config['database']
-        db['sum_formulas_fn'] = expanduser(db['sum_formulas'])
-        db['is_decoy'] = False
 
         return [ComputeFDR(imzml, instrument, db, adduct)
                 for adduct in db['adducts']]
 
+def readConfig(filename):
+    with open(filename) as conf:
+        config = json.load(conf, object_pairs_hook=luigi.parameter.FrozenOrderedDict)
+
+    cfg = config.get_wrapped()
+    cfg['imzml'] = expanduser(config['imzml'])
+    cfg['database'].get_wrapped()['sum_formulas_fn'] = expanduser(config['database']['sum_formulas'])
+    cfg['database'].get_wrapped()['adducts'] = tuple(cfg['database']['adducts'])
+    cfg['database'].get_wrapped()['is_decoy'] = False
+    return config
+
 if __name__ == '__main__':
-    luigi.run()
+    import sys
+    config = readConfig(sys.argv[1])
+    luigi.build([RunFullPipeline(config)], scheduler_port=8083)
