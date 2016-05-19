@@ -10,7 +10,6 @@ dependencies:
   - pip
   - numpy=1.10
   - cffi=1.5.2
-  - luigi
   - scipy
   - toolz
   - dask
@@ -22,4 +21,5 @@ dependencies:
     - cpyMSpec==0.1.4
     - pyMSpec==0.1
     - wheezy.template
+    - luigi
     - git+https://github.com/alexandrovteam/pyimzML.git@494f52e1519fcf820bf89f19f28344ddea45d3cf # TODO: package on PyPI
