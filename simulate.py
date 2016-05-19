@@ -29,6 +29,11 @@ class SpectrumGenerator(object):
         self.layers = layers
         self.detection_limit = detection_limit
 
+        # sparse noise parameters
+        self.noise_prob = np.median(layers['noise']['prob'])
+        self.noise_sqrt_avg = np.median(layers['noise']['sqrt_avg'])
+        self.noise_sqrt_std = np.median(layers['noise']['sqrt_std'])
+
         # for each m/z bin, self._n_samples random intensity values are generated;
         self._n_samples = 50
 
@@ -87,10 +92,24 @@ class SpectrumGenerator(object):
         result[nnz] += e[idx] * layer_intensity
         return result
 
+    def _addSparseNoise(self, result, x, y):
+        min_int = self.layers['min_intensities'][x, y]
+        nmf_mz_axis = self.layers['nmf_mz_axis']
+        bins = np.arange(len(nmf_mz_axis))
+        noisy_bins = bins[np.random.binomial(2, self.noise_prob, len(bins)).astype(bool)]
+        noise_mzs = nmf_mz_axis[noisy_bins, 0] + np.random.normal(0.0, 1e-3, len(noisy_bins))
+        noise_intensities = np.random.normal(self.noise_sqrt_avg, self.noise_sqrt_std,
+                                             len(noisy_bins))**2
+
+        visible = noise_intensities > min_int
+        bins = self.mz_axis[:-1].searchsorted(noise_mzs[visible])
+        result[bins] += noise_intensities[visible]
+
     def generate(self, x, y, centroids=True):
         result = np.zeros_like(self.mz_axis)
         for i in self.layers['layers_list'].keys():
             self._addNoisyEnvelope(result, i, x, y)
+        self._addSparseNoise(result, x, y)
 
         profile = (self.mz_axis, result)
         if centroids:
@@ -132,9 +151,10 @@ def writeSimulatedFile(spectrum_generator, output_filename):
         step_y = 1
 
         for x in range(0, nx, step_x):
-            spectra = (simulate_spectrum(sg, x, y) for y in range(0, ny, step_y))
-            for y, spectrum in enumerate(spectra):
-                mzs, intensities = spectrum
+            for y in range(0, ny, step_y):
+                if np.isinf(sg.layers['min_intensities'][x, y]):
+                    continue
+                mzs, intensities = simulate_spectrum(sg, x, y)
                 w.addSpectrum(mzs, intensities, [x / step_x, y])
             print "{}% done".format(min(1.0, float(x + 1)/nx) * 100.0)
 

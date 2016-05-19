@@ -23,19 +23,29 @@ args = parser.parse_args()
 db = set()
 if args.db:
     for line in open(args.db):
-        sf_str = str(pyisocalc.parseSumFormula(line.split()[-1]))
+        sf_str = str(pyisocalc.parseSumFormula(line.strip()))
         db.add(sf_str)
     print "target database size:", len(db)
 
 # FIXME: put it to conda or use chemcalc
 pfg_executable_dir = os.path.expanduser("~/github/PFG")
 
+layers = {}
+noise = {}
+
 with open(args.input) as f:
     with np.load(f) as data:
         W = data['W']
         H = data['H']
         shape = data['shape']
-        mz_axis = zip(*data['mz_axis'])[0]
+        mz_axis = data['mz_axis'][:, 0]
+        nmf_ppms = data['mz_axis'][:, 1]
+        noise['prob'] = data['noise_prob']
+        noise['sqrt_avg'] = data['noise_sqrt_avg']
+        noise['sqrt_std'] = data['noise_sqrt_std']
+        layers['noise'] = noise
+        layers['min_intensities'] = data['min_intensities'][1:, 1:]
+        layers['nmf_mz_axis'] = data['mz_axis']
 
 def _combine_results(dfs):
     if len(dfs) == 0:
@@ -104,12 +114,19 @@ class MoleculeAssigner(object):
         return str(pyisocalc.parseSumFormula(sf))
 
     def _score_match(self, row, mzs_c, ints_c, ppm_t):
+        normalized_mf = self._normalize_sf(row.mf)
+        if normalized_mf in self._target_db:
+            return 5
+        if normalized_mf in self._already_assigned:
+            return 10
+        return 1
+
+    def _keep_list(self, row, mzs_c, ints_c, ppm_t):
         theor_spec = IsotopePattern("{}+{}".format(row.mf, row.adduct))
         theor_spec = theor_spec.centroids(resolutionAt(theor_spec.masses[0]))
         theor_spec = theor_spec.charged(1).trimmed(5)
 
         prev_intensity = None
-        n = 0
         keep_list_all = np.ones_like(mzs_c, dtype=np.bool)
         for m, a in zip(theor_spec.masses, theor_spec.abundances):
             keep_list = 1e6 * np.abs(mzs_c - m) / m > ppm_t
@@ -121,52 +138,52 @@ class MoleculeAssigner(object):
             if prev_intensity and abs(intensity) > abs(prev_intensity):
                 break
             prev_intensity = intensity
-            n += 1
-        if n > 1:
-            normalized_mf = self._normalize_sf(row.mf)
-            if normalized_mf in self._target_db:
-                n += 5
-            if normalized_mf in self._already_assigned:
-                n += 10
 
-        return n, keep_list_all
+        return keep_list_all
 
-    def fit_spectrum(self, mzs_c, ints_c, ppm_t, detection_limit, max_peaks=500):
+    def fit_spectrum(self, mzs_c, ppms, ints_c, detection_limit, max_peaks=500):
         order = np.argsort(np.abs(ints_c))
         mzs_c = np.asarray(mzs_c)[order]
+        ppms = np.asarray(ppms)[order]
         ints_c = np.asarray(ints_c)[order]
 
         mzs_c = mzs_c[ints_c >= detection_limit]
+        ppms = ppms[ints_c >= detection_limit]
         ints_c = ints_c[ints_c >= detection_limit]
 
         n_peaks_initial = len(mzs_c)
 
         sf_list = []
+
         while len(mzs_c) > 0 and ints_c[-1] >= detection_limit:
             mz = mzs_c[-1]
             v = ints_c[-1]
-            hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm_t)
+            ppm = ppms[-1]
+            hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm)
             if len(hits) == 0:
                 print 'no hits for {}'.format(mz)
                 mzs_c = mzs_c[:-1]
                 ints_c = ints_c[:-1]
+                ppms = ppms[:-1]
                 continue
 
-            scores = [self._score_match(candidate, mzs_c, ints_c, ppm_t)[0]
+            scores = [self._score_match(candidate, mzs_c, ints_c, ppm)
                       for candidate in hits.itertuples()]
 
             best_hit_idx = np.argmax(scores)
             best_hit = hits.iloc[best_hit_idx]
 
-            keep_list = self._score_match(best_hit, mzs_c, ints_c, ppm_t)[1]
+            keep_list = self._keep_list(best_hit, mzs_c, ints_c, ppm)
             if np.all(keep_list):
-                # should not happen
+                print 'wtf'
                 mzs_c = mzs_c[:-1]
                 ints_c = ints_c[:-1]
+                ppms = ppms[:-1]
                 continue
 
             mzs_c = mzs_c[keep_list]
             ints_c = ints_c[keep_list]
+            ppms = ppms[keep_list]
 
             sf_list.append([v, best_hit])
             self._already_assigned.add(self._normalize_sf(best_hit['mf']))
@@ -187,10 +204,9 @@ for ii in range(H.shape[0]):
     print "coeff", ii
     coeff_spec = H[ii]
 
-    # fit spectral component with 5 ppm tolerance
     # FIXME make parameters adjustable
     detection_limit = 1e-3
-    spec_fit.append(assigner.fit_spectrum(mz_axis, coeff_spec, 5, detection_limit))
+    spec_fit.append(assigner.fit_spectrum(mz_axis, nmf_ppms, coeff_spec, detection_limit))
 
     sum_formulas = set([str(pyisocalc.parseSumFormula(x[1]['mf'])) for x in spec_fit[-1][0]])
     if len(spec_fit[-1][0]) > 0:
@@ -199,7 +215,6 @@ for ii in range(H.shape[0]):
 
 print "median percentage of database formulas:", np.median(db_percentage)
 
-layers = {}
 layers['layers_list'] = OrderedDict()
 for ii in range(len(spec_fit)):
     layers['layers_list'][ii] = {}
