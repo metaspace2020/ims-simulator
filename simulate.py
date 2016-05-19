@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from cpyMSpec import IsotopePattern, centroidize
 from pyimzml.ImzMLWriter import ImzMLWriter
 

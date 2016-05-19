@@ -10,6 +10,7 @@ dependencies:
   - pip
   - numpy=1.10
   - cffi=1.5.2
+  - luigi
   - scipy
   - toolz
   - dask
