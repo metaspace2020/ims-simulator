@@ -21,6 +21,8 @@ parser.add_argument('--db', type=str, help="text file with desired molecules, on
 
 args = parser.parse_args()
 
+output_filename = os.path.join(os.getcwd(), os.path.expanduser(args.output))
+
 db = set()
 if args.db:
     for line in open(args.db):
@@ -227,5 +229,5 @@ for ii in range(len(spec_fit)):
         layers['layers_list'][ii]['sf_list'].append({"sf_a": sf_a, "mult": mult})
 
 # save the layers for later analysis
-with open(os.path.expanduser(args.output), "w+") as f:
+with open(output_filename, "w+") as f:
     pickle.dump(layers, f)

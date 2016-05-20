@@ -4,7 +4,11 @@ import pandas as pd
 
 from os.path import splitext, basename, expanduser
 import subprocess
+import tempfile
+import shutil
 import json
+import sys
+import os
 
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
@@ -19,14 +23,58 @@ class AdductListParameter(luigi.Parameter):
         return tuple(arguments.split(','))
 
 def get_id(obj):
-    return str(abs(hash(obj)))[:8]
+    try:
+        return str(abs(hash(obj)))[:8]
+    except:
+        # horrible hacks to get a hash for luigi.DictParameter
+        def unfreeze(x):
+            if type(x) == luigi.parameter.FrozenOrderedDict:
+                return {k: unfreeze(x[k]) for k in x}
+            else:
+                return x
 
-class CreateIsotopeDB(luigi.Task):
+        if type(obj) == luigi.parameter.FrozenOrderedDict:
+            obj = unfreeze(obj)
+
+        import json
+        return str(abs(hash(json.dumps(obj))))[:8]
+
+def get_prefix(path):
+    return splitext(basename(path))[0]
+
+class CmdlineTask(luigi.Task):
+    def output(self):
+        return luigi.LocalTarget(self.output_filename())
+
+    def output_filename(self):
+        raise NotImplementedError
+
+    def program_args(self):
+        raise NotImplementedError
+
+    def output_is_stdout(self):
+        return False
+
+    def internal_script(self, name):
+        return os.path.join(os.path.dirname(__file__), name)
+
+    def run(self):
+        args = [str(arg) for arg in self.program_args()]
+
+        if self.output_is_stdout():
+            f = tempfile.NamedTemporaryFile(delete=False)
+            subprocess.check_call(args, stdout=f)
+            f.close()
+            shutil.move(f.name, self.output_filename())
+        else:
+            subprocess.check_call(args)
+
+class CreateIsotopeDB(CmdlineTask):
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
 
-    def _output_filename(self):
-        db_name = splitext(basename(self.molecular_db['sum_formulas_fn']))[0]
+    def output_filename(self):
+        db_name = get_prefix(self.molecular_db['sum_formulas_fn'])
         fn = "{}_{}_{}_{}.db".format(db_name,
                                      self.instrument['type'],
                                      self.instrument['res200'],
@@ -35,33 +83,25 @@ class CreateIsotopeDB(luigi.Task):
             fn += ".decoy"
         return fn
 
-    def output(self):
-        return luigi.LocalTarget(self._output_filename())
+    def program_args(self):
+        return ['ims', 'isocalc',
+                '--instrument', self.instrument['type'],
+                '--resolution', self.instrument['res200'],
+                '--adducts', ",".join(self.molecular_db['adducts']),
+                self.molecular_db['sum_formulas_fn'],
+                self.output_filename()]
 
-    def run(self):
-        cmd = ['ims', 'isocalc',
-               '--instrument', self.instrument['type'],
-               '--resolution', str(self.instrument['res200']),
-               '--adducts', ",".join(self.molecular_db['adducts']),
-               self.molecular_db['sum_formulas_fn'],
-               self._output_filename()]
-        subprocess.check_call(cmd)
-
-class ConvertImzMLToImzb(luigi.Task):
+class ConvertImzMLToImzb(CmdlineTask):
     imzml_fn = luigi.Parameter()
 
-    def _output_filename(self):
+    def output_filename(self):
         return splitext(self.imzml_fn)[0] + ".imzb"
 
-    def output(self):
-        return luigi.LocalTarget(self._output_filename())
+    def program_args(self):
+        return ['ims', 'convert',
+                self.imzml_fn, self.output_filename()]
 
-    def run(self):
-        cmd = ['ims', 'convert',
-               self.imzml_fn, self._output_filename()]
-        subprocess.check_call(cmd)
-
-class RunAnnotation(luigi.Task):
+class RunAnnotation(CmdlineTask):
     imzml_fn = luigi.Parameter()
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
@@ -72,20 +112,18 @@ class RunAnnotation(luigi.Task):
             'isotope_db': CreateIsotopeDB(self.instrument, self.molecular_db),
         }
 
-    def _output_filename(self):
+    def output_filename(self):
         db_id = get_id(self.molecular_db) + "."
         db_id += 'decoy' if self.molecular_db['is_decoy'] else 'target'
-        return splitext(basename(self.imzml_fn))[0] + ".results." + db_id
+        return get_prefix(self.imzml_fn) + ".results." + db_id
 
-    def output(self):
-        return luigi.LocalTarget(self._output_filename())
+    def output_is_stdout(self):
+        return True
 
-    def run(self):
-        cmd = ['ims', 'detect',
-               self.input()['isotope_db'].fn,
-               self.input()['imzb'].fn]
-        with open(self._output_filename(), "w+") as f:
-            subprocess.check_call(cmd, stdout=f)
+    def program_args(self):
+        return ['ims', 'detect',
+                self.input()['isotope_db'].fn,
+                self.input()['imzb'].fn]
 
 class GetAnnotationsForAdduct(luigi.Task):
     imzml_fn = luigi.Parameter()
@@ -112,7 +150,7 @@ class GetAnnotationsForAdduct(luigi.Task):
         else:
             return self.input()
 
-class ComputeFDR(luigi.Task):
+class ComputeFDR(CmdlineTask):
     imzml_fn = luigi.Parameter()
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
@@ -126,7 +164,7 @@ class ComputeFDR(luigi.Task):
             'decoy_results': RunAnnotation(self.imzml_fn, self.instrument, self._decoy_molecular_db())
         }
 
-    def _output_filename(self):
+    def output_filename(self):
         prefix = splitext(self.input()['decoy_results'].fn)[0] + "_" + get_id(self.molecular_db)
         if self.adduct:
             return prefix + "_" + self.adduct + ".fdr"
@@ -141,28 +179,98 @@ class ComputeFDR(luigi.Task):
             if adduct in DECOY_ADDUCTS:
                 result.remove(adduct)
 
-        return tuple(list(result))
+        return tuple(result)
 
     def _decoy_molecular_db(self):
-        return luigi.parameter.FrozenOrderedDict([
-            ('sum_formulas_fn', self.molecular_db['sum_formulas_fn']),
-            ('adducts', self._decoy_adducts()),
-            ('is_decoy', True)
-        ])
+        return luigi.parameter.FrozenOrderedDict(
+            sum_formulas_fn=self.molecular_db['sum_formulas_fn'],
+            adducts=self._decoy_adducts(),
+            is_decoy=True
+        )
 
-    def output(self):
-        return luigi.LocalTarget(self._output_filename())
+    def output_is_stdout(self):
+        return True
 
-    def run(self):
-        cmd = ['ims', 'fdr',
-               self.input()['target_results'].fn,
-               self.input()['decoy_results'].fn]
+    def program_args(self):
+        args = ['ims', 'fdr',
+                self.input()['target_results'].fn,
+                self.input()['decoy_results'].fn]
         if self.groundtruth_fn:
-            cmd += ['--groundtruth', self.groundtruth_fn]
-        with open(self._output_filename(), "w+") as f:
-            subprocess.check_call(cmd, stdout=f, stderr=subprocess.STDOUT)
+            args += ['--groundtruth', self.groundtruth_fn]
+        return args
 
-class RunFullPipeline(luigi.WrapperTask):
+class SimulationTask(CmdlineTask):
+    config = luigi.DictParameter()
+
+    @property
+    def imzml_fn(self):
+        return self.config['imzml']
+
+    @property
+    def instrument(self):
+        return self.config['instrument']
+
+    @property
+    def molecular_db(self):
+        return self.config['database']
+
+    def depends_on(self):
+        return [k for k in self.config.keys() if k != 'imzml']
+
+    def file_extension(self):
+        raise NotImplementedError
+
+    def output_filename(self):
+        fn = get_prefix(self.imzml_fn)
+        for key in self.depends_on():
+            fn += "_" + get_id(self.config[key])
+        return fn + "." + self.file_extension()
+
+class ComputeFactorization(SimulationTask):
+    def requires(self):
+        return ConvertImzMLToImzb(self.imzml_fn)
+
+    def depends_on(self):
+        return ['instrument', 'factorization']
+
+    def file_extension(self):
+        return "nmf"
+
+    def program_args(self):
+        return [self.internal_script("NNMF.py"),
+                self.input().fn, self.output_filename(),
+                "--instrument", self.instrument['type'],
+                "--res200", self.instrument['res200'],
+                "--rank", self.config['factorization']['rank']]
+
+class AssignMolecules(SimulationTask):
+    def requires(self):
+        return ComputeFactorization(self.config)
+
+    def file_extension(self):
+        return "layers"
+
+    def program_args(self):
+        return [self.internal_script("assignMolecules.py"),
+                self.input().fn, self.output_filename(),
+                "--instrument", self.instrument['type'],
+                "--res200", self.instrument['res200'],
+                "--db", self.molecular_db['sum_formulas_fn']]
+
+class SimulateDataset(SimulationTask):
+    def requires(self):
+        return AssignMolecules(self.config)
+
+    def file_extension(self):
+        return "simulated.imzML"
+
+    def program_args(self):
+        return [self.internal_script("simulate.py"),
+                self.input().fn, self.output_filename(),
+                "--instrument", self.instrument['type'],
+                "--res200", self.instrument['res200']]
+
+class RunFullPipeline(luigi.Task):
     config = luigi.DictParameter()
 
     def requires(self):
@@ -170,8 +278,38 @@ class RunFullPipeline(luigi.WrapperTask):
         instrument = self.config['instrument']
         db = self.config['database']
 
-        return [ComputeFDR(imzml, instrument, db, adduct)
-                for adduct in db['adducts']]
+        return {adduct: ComputeFDR(imzml, instrument, db, adduct)
+                for adduct in db['adducts']}
+
+    def output(self):
+        return {adduct: luigi.LocalTarget(self.input()[adduct].fn)
+                for adduct in self.input()}
+
+    def run(self):
+        pass
+
+class SimulateAndRunFullPipeline(luigi.WrapperTask):
+    config = luigi.DictParameter()
+
+    def requires(self):
+        return SimulateDataset(self.config)
+
+    def run(self):
+        simulation_config = luigi.parameter.FrozenOrderedDict(
+            imzml=self.input().fn,
+            database=self.config['database'],
+            instrument=self.config['instrument']
+        )
+        print simulation_config
+        yield RunFullPipeline(simulation_config)
+
+# TODO
+class ComputeSimilarityMetrics(luigi.WrapperTask):
+    config = luigi.DictParameter()
+
+    def requires(self):
+        return [RunFullPipeline(config),
+                SimulateAndRunFullPipeline(config)]
 
 def readConfig(filename):
     with open(filename) as conf:
@@ -185,6 +323,5 @@ def readConfig(filename):
     return config
 
 if __name__ == '__main__':
-    import sys
     config = readConfig(sys.argv[1])
-    luigi.build([RunFullPipeline(config)], scheduler_port=8083)
+    luigi.build([ComputeSimilarityMetrics(config)])

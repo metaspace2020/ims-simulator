@@ -9,5 +9,9 @@
     "database": {
         "sum_formulas": "~/metabolomics/chebi_metabolites.txt",
         "adducts": ["+H", "+K", "+Na"]
+    },
+
+    "factorization": {
+        "rank": 50
     }
 }

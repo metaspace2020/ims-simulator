@@ -10,6 +10,8 @@ from external.nnls import nnlsm_blockpivot
 
 import argparse
 
+np.random.seed(24)
+
 parser = argparse.ArgumentParser(description="compute NMF of a centroided dataset")
 parser.add_argument('input', type=str, help="input file in .imzb format")
 parser.add_argument('output', type=str, help="output file (numpy-readable NMF)")
