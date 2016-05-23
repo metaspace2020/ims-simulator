@@ -6,6 +6,7 @@ from os.path import splitext, basename, expanduser
 import subprocess
 import tempfile
 import shutil
+from collections import OrderedDict
 import json
 import sys
 import os
@@ -22,17 +23,17 @@ class AdductListParameter(luigi.Parameter):
     def parse(self, arguments):
         return tuple(arguments.split(','))
 
+def unfreeze(x):
+    if type(x) == luigi.parameter.FrozenOrderedDict:
+        return {k: unfreeze(x[k]) for k in x}
+    else:
+        return x
+
 def get_id(obj):
     try:
         return str(abs(hash(obj)))[:8]
     except:
         # horrible hacks to get a hash for luigi.DictParameter
-        def unfreeze(x):
-            if type(x) == luigi.parameter.FrozenOrderedDict:
-                return {k: unfreeze(x[k]) for k in x}
-            else:
-                return x
-
         if type(obj) == luigi.parameter.FrozenOrderedDict:
             obj = unfreeze(obj)
 
@@ -115,7 +116,7 @@ class RunAnnotation(CmdlineTask):
     def output_filename(self):
         db_id = get_id(self.molecular_db) + "."
         db_id += 'decoy' if self.molecular_db['is_decoy'] else 'target'
-        return get_prefix(self.imzml_fn) + ".results." + db_id
+        return get_prefix(self.imzml_fn) + ".results.db" + db_id + "_ins" + get_id(self.instrument)
 
     def output_is_stdout(self):
         return True
@@ -223,7 +224,7 @@ class SimulationTask(CmdlineTask):
     def output_filename(self):
         fn = get_prefix(self.imzml_fn)
         for key in self.depends_on():
-            fn += "_" + get_id(self.config[key])
+            fn += "_" + key[:3] + get_id(self.config[key])
         return fn + "." + self.file_extension()
 
 class ComputeFactorization(SimulationTask):
@@ -270,6 +271,16 @@ class SimulateDataset(SimulationTask):
                 "--instrument", self.instrument['type'],
                 "--res200", self.instrument['res200']]
 
+def simulatedDataFilename(config):
+    return SimulateDataset(config).output_filename()
+
+def simulatedDataConfig(config):
+    return luigi.parameter.FrozenOrderedDict(
+        imzml=simulatedDataFilename(config),
+        database=config['database'],
+        instrument=config['instrument']
+    )
+
 class RunFullPipeline(luigi.Task):
     config = luigi.DictParameter()
 
@@ -282,34 +293,51 @@ class RunFullPipeline(luigi.Task):
                 for adduct in db['adducts']}
 
     def output(self):
-        return {adduct: luigi.LocalTarget(self.input()[adduct].fn)
-                for adduct in self.input()}
+        return luigi.LocalTarget(get_id(self.config) + "_fdr_completed.txt")
 
     def run(self):
-        pass
+        with self.output().open("w") as f:
+            for adduct in self.input():
+                f.write("{},{}\n".format(adduct, self.input()[adduct].fn))
 
-class SimulateAndRunFullPipeline(luigi.WrapperTask):
+class CreateAnnotationConfigForSimulatedData(luigi.Task):
     config = luigi.DictParameter()
+    priority = 10
 
     def requires(self):
         return SimulateDataset(self.config)
 
+    def output(self):
+        return luigi.LocalTarget("simulated_{}_config.json".format(get_id(self.config)))
+
     def run(self):
-        simulation_config = luigi.parameter.FrozenOrderedDict(
-            imzml=self.input().fn,
-            database=self.config['database'],
-            instrument=self.config['instrument']
-        )
-        print simulation_config
-        yield RunFullPipeline(simulation_config)
+        with self.output().open("w") as f:
+            simulation_config = unfreeze(simulatedDataConfig(self.config))
+            json.dump(simulation_config, f)
+
+class SimulateAndRunFullPipeline(luigi.Task):
+    config = luigi.DictParameter()
+
+    def requires(self):
+        return CreateAnnotationConfigForSimulatedData(self.config)
+
+    def _pipeline(self):
+        return RunFullPipeline(simulatedDataConfig(self.config))
+
+    def output(self):
+        return self._pipeline().output()
+
+    def run(self):
+        self._pipeline().run()
 
 # TODO
 class ComputeSimilarityMetrics(luigi.WrapperTask):
     config = luigi.DictParameter()
 
     def requires(self):
-        return [RunFullPipeline(config),
-                SimulateAndRunFullPipeline(config)]
+        return [RunFullPipeline(self.config),
+                CreateAnnotationConfigForSimulatedData(self.config),
+                RunFullPipeline(simulatedDataConfig(self.config))]
 
 def readConfig(filename):
     with open(filename) as conf:
