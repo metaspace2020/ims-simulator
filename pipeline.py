@@ -283,6 +283,7 @@ def simulatedDataConfig(config):
 
 class RunFullPipeline(luigi.Task):
     config = luigi.DictParameter()
+    # TODO: add groundtruth parameter (once noise metrics are in place)
 
     def requires(self):
         imzml = self.config['imzml']

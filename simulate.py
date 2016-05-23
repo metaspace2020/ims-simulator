@@ -98,6 +98,8 @@ class SpectrumGenerator(object):
         nmf_mz_axis = self.layers['nmf_mz_axis']
         bins = np.arange(len(nmf_mz_axis))
         noisy_bins = bins[np.random.binomial(2, self.noise_prob, len(bins)).astype(bool)]
+        if not noisy_bins:
+            return
         noise_mzs = nmf_mz_axis[noisy_bins, 0] + np.random.normal(0.0, 1e-3, len(noisy_bins))
         noise_intensities = np.random.normal(self.noise_sqrt_avg, self.noise_sqrt_std,
                                              len(noisy_bins))**2
