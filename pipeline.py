@@ -258,21 +258,47 @@ class AssignMolecules(SimulationTask):
                 "--res200", self.instrument['res200'],
                 "--db", self.molecular_db['sum_formulas_fn']]
 
-class SimulateDataset(SimulationTask):
+class ComputeStatistics(SimulationTask):
+    def file_extension(self):
+        return "stats"
+
+    def depends_on(self):
+        return []
+
+    def program_args(self):
+        return [self.internal_script("collectStats.py"),
+                self.imzml_fn, self.output_filename()]
+
+class SimulateCleanDataset(SimulationTask):
     def requires(self):
         return AssignMolecules(self.config)
 
     def file_extension(self):
-        return "simulated.imzML"
+        return "sim_profile_clean.imzML"
 
     def program_args(self):
-        return [self.internal_script("simulate.py"),
+        return [self.internal_script("simulateClean.py"),
                 self.input().fn, self.output_filename(),
                 "--instrument", self.instrument['type'],
                 "--res200", self.instrument['res200']]
 
+class SimulateNoisyDataset(SimulationTask):
+    # TODO
+    def requires(self):
+        return [SimulateCleanDataset(self.config),
+                ComputeStatistics(self.config)]
+
+    def file_extension(self):
+        return "sim.imzML"
+
+    def program_args(self):
+        return [self.internal_script("addNoise.py"),
+                self.input()[0].fn,
+                self.input()[1].fn,
+                self.output_filename()]
+
 def simulatedDataFilename(config):
-    return SimulateDataset(config).output_filename()
+    return SimulateNoisyDataset(config).output_filename()
 
 def simulatedDataConfig(config):
     return luigi.parameter.FrozenOrderedDict(
@@ -306,7 +332,7 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
     priority = 10
 
     def requires(self):
-        return SimulateDataset(self.config)
+        return SimulateNoisyDataset(self.config)
 
     def output(self):
         return luigi.LocalTarget("simulated_{}_config.json".format(get_id(self.config)))

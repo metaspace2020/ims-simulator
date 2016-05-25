@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from cpyMSpec import IsotopePattern, centroidize
+from cpyMSpec import IsotopePattern
 from pyimzml.ImzMLWriter import ImzMLWriter
 
 from mz_axis import Instrument
@@ -9,9 +9,7 @@ import numpy as np
 import cPickle
 import argparse
 
-np.random.seed(42)  # for reproducibility / debugging
-
-parser = argparse.ArgumentParser(description="simulate a dataset from layers")
+parser = argparse.ArgumentParser(description="simulate a clean (profile) dataset from layers")
 parser.add_argument('input', type=str, help="input file produced by assignMolecules.py")
 parser.add_argument('output', type=str, help="output filename (centroided .imzML)")
 parser.add_argument('--instrument', type=str, default='orbitrap', choices=['orbitrap', 'fticr'])
@@ -21,15 +19,9 @@ args = parser.parse_args()
 instr = Instrument(args)
 
 class SpectrumGenerator(object):
-    def __init__(self, layers, mz_axis, detection_limit=1e-3):
+    def __init__(self, layers, mz_axis):
         self.mz_axis = mz_axis
         self.layers = layers
-        self.detection_limit = detection_limit
-
-        # sparse noise parameters
-        self.noise_prob = np.median(layers['noise']['prob'])
-        self.noise_sqrt_avg = np.median(layers['noise']['sqrt_avg'])
-        self.noise_sqrt_std = np.median(layers['noise']['sqrt_std'])
 
         # for each m/z bin, self._n_samples random intensity values are generated;
         self._n_samples = 50
@@ -59,82 +51,41 @@ class SpectrumGenerator(object):
     def _computeEnvelopes(self):
         self._envelopes = {}
         self._nnz = {}
-        noisy_mzs = np.repeat(self.mz_axis, self._n_samples)
-
-        # FIXME: make offset resolution-dependent / user-adjustable
-        noisy_mzs += np.random.normal(scale=1e-4, size=len(noisy_mzs))
 
         for i in self.layers['layers_list'].keys():
-            envelope = np.zeros_like(noisy_mzs)
+            envelope = np.zeros_like(self.mz_axis)
             for d in self.isotope_patterns[i]:
-                ln = max(0, (d['l'] - 1) * self._n_samples)
-                rn = min(len(envelope), (d['r'] + 1) * self._n_samples)
-                mzs = noisy_mzs[ln:rn]
-                order = np.argsort(mzs)
-                envelope_values = d['p'].envelope(d['resolution'])(mzs[order])
-                envelope[ln:rn][order] += d['intensity'] * envelope_values
+                l, r = d['l'], d['r']
+                mzs = self.mz_axis[l:r]
+                envelope_values = d['p'].envelope(d['resolution'])(mzs)
+                envelope[l:r] += d['intensity'] * envelope_values
             # avoid storing zeros - they would occupy too much RAM
-            self._nnz[i] = np.unique((np.where(envelope > 0)[0] / self._n_samples).astype(int))
-            nnz_rnd = []
-            for j in self._nnz[i]:
-                nnz_rnd.extend([j * self._n_samples + k for k in xrange(self._n_samples)])
-            self._envelopes[i] = envelope.take(nnz_rnd)
+            self._nnz[i] = np.where(envelope > 0)[0]
+            self._envelopes[i] = envelope.take(self._nnz[i])
 
-    def _addNoisyEnvelope(self, result, layer, x, y):
+    def _addEnvelope(self, result, layer, x, y):
         layer_intensity = self.layers['layers_list'][layer]['image'][x, y]
         e = self._envelopes[layer]
         nnz = self._nnz[layer]
-        idx = np.arange(len(nnz)) * self._n_samples
-        idx += np.random.randint(0, self._n_samples, len(idx))
+        idx = np.arange(len(nnz))
         result[nnz] += e[idx] * layer_intensity
         return result
-
-    def _addSparseNoise(self, result, x, y):
-        min_int = self.layers['min_intensities'][x, y]
-        nmf_mz_axis = self.layers['nmf_mz_axis']
-        bins = np.arange(len(nmf_mz_axis))
-        noisy_bins = bins[np.random.binomial(2, self.noise_prob, len(bins)).astype(bool)]
-        if not noisy_bins:
-            return
-        noise_mzs = nmf_mz_axis[noisy_bins, 0] + np.random.normal(0.0, 1e-3, len(noisy_bins))
-        noise_intensities = np.random.normal(self.noise_sqrt_avg, self.noise_sqrt_std,
-                                             len(noisy_bins))**2
-
-        visible = noise_intensities > min_int
-        bins = self.mz_axis[:-1].searchsorted(noise_mzs[visible])
-        result[bins] += noise_intensities[visible]
 
     def generate(self, x, y, centroids=True):
         result = np.zeros_like(self.mz_axis)
         for i in self.layers['layers_list'].keys():
-            self._addNoisyEnvelope(result, i, x, y)
-        self._addSparseNoise(result, x, y)
+            self._addEnvelope(result, i, x, y)
 
-        profile = (self.mz_axis, result)
-        if centroids:
-            p = centroidize(profile[0], profile[1])
-            order = np.argsort(p.masses)
-            masses = np.array(p.masses)[order]
-            intensities = np.array(p.abundances)[order]
-
-            # simulate limited dynamic range
-            high_ints = intensities > self.detection_limit
-            masses = masses[high_ints]
-            intensities = intensities[high_ints]
-
-            intensities *= max(profile[1])
-
-            return masses, intensities
-        else:
-            return profile
+        # don't store zeross
+        nnz = result > (1e-6 * result.max())
+        return (self.mz_axis[nnz], result[nnz])
 
 with open(args.input) as f:
     layers = cPickle.load(f)
 
-# FIXME: hardcoded mz_axis and detection_limit
+# FIXME: hardcoded mz_axis
 sg = SpectrumGenerator(mz_axis=np.linspace(100, 1000, 1000000),
-                       layers=layers,
-                       detection_limit=1e-3)
+                       layers=layers)
 
 def simulate_spectrum(sg, x, y):
     return sg.generate(x, y)

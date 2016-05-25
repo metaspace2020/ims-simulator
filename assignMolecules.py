@@ -140,14 +140,12 @@ class MoleculeAssigner(object):
 
         return keep_list_all
 
-    def fit_spectrum(self, mzs_c, ppms, ints_c, detection_limit, max_peaks=500):
+    def fit_spectrum(self, mzs_c, ppm, ints_c, detection_limit, max_peaks=500):
         order = np.argsort(np.abs(ints_c))
         mzs_c = np.asarray(mzs_c)[order]
-        ppms = np.asarray(ppms)[order]
         ints_c = np.asarray(ints_c)[order]
 
         mzs_c = mzs_c[ints_c >= detection_limit]
-        ppms = ppms[ints_c >= detection_limit]
         ints_c = ints_c[ints_c >= detection_limit]
 
         n_peaks_initial = len(mzs_c)
@@ -157,13 +155,11 @@ class MoleculeAssigner(object):
         while len(mzs_c) > 0 and ints_c[-1] >= detection_limit:
             mz = mzs_c[-1]
             v = ints_c[-1]
-            ppm = ppms[-1]
             hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm)
             if len(hits) == 0:
                 # print 'no hits for {}'.format(mz)
                 mzs_c = mzs_c[:-1]
                 ints_c = ints_c[:-1]
-                ppms = ppms[:-1]
                 continue
 
             scores = [self._score_match(candidate, mzs_c, ints_c, ppm)
@@ -177,12 +173,10 @@ class MoleculeAssigner(object):
                 print 'wtf'
                 mzs_c = mzs_c[:-1]
                 ints_c = ints_c[:-1]
-                ppms = ppms[:-1]
                 continue
 
             mzs_c = mzs_c[keep_list]
             ints_c = ints_c[keep_list]
-            ppms = ppms[keep_list]
 
             sf_list.append([v, best_hit])
             self._already_assigned.add(self._normalize_sf(best_hit['mf']))
@@ -211,7 +205,7 @@ for ii in range(H.shape[0]):
 
     # FIXME make parameters adjustable
     detection_limit = 1e-3
-    spec_fit.append(assigner.fit_spectrum(mzs, nmf_ppms, abundances, detection_limit))
+    spec_fit.append(assigner.fit_spectrum(mzs, 3, abundances, detection_limit))
 
     sum_formulas = set([str(pyisocalc.parseSumFormula(x[1]['mf'])) for x in spec_fit[-1][0]])
     if len(spec_fit[-1][0]) > 0:
