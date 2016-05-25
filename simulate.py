@@ -2,6 +2,8 @@
 from cpyMSpec import IsotopePattern, centroidize
 from pyimzml.ImzMLWriter import ImzMLWriter
 
+from mz_axis import Instrument
+
 import numpy as np
 
 import cPickle
@@ -16,13 +18,7 @@ parser.add_argument('--instrument', type=str, default='orbitrap', choices=['orbi
 parser.add_argument('--res200', type=float, default=140000)
 
 args = parser.parse_args()
-
-# FIXME code duplication
-def resolutionAt(mz):
-    if args.instrument == 'orbitrap':
-        return args.res200 * (200.0 / mz) ** 0.5
-    elif args.instrument == 'fticr':
-        return args.res200 * (200.0 / mz)
+instr = Instrument(args)
 
 class SpectrumGenerator(object):
     def __init__(self, layers, mz_axis, detection_limit=1e-3):
@@ -53,7 +49,7 @@ class SpectrumGenerator(object):
             for sf in layer['sf_list']:
                 data = {}
                 data['p'] = p = IsotopePattern(sf['sf_a']).charged(1)
-                data['resolution'] = resolutionAt(p.masses[0])
+                data['resolution'] = instr.resolutionAt(p.masses[0])
                 data['l'] = np.searchsorted(self.mz_axis, min(p.masses) - 0.5, 'l')
                 data['r'] = np.searchsorted(self.mz_axis, max(p.masses) + 1, 'r')
                 data['fwhm'] = p.masses[0] / data['resolution']

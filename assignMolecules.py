@@ -8,7 +8,9 @@ import pickle
 from collections import OrderedDict
 
 from pyMSpec.pyisocalc import pyisocalc
-from cpyMSpec import IsotopePattern
+from cpyMSpec import IsotopePattern, centroidize
+
+from mz_axis import Instrument
 
 import argparse
 
@@ -20,6 +22,7 @@ parser.add_argument('--res200', type=float, default=140000)
 parser.add_argument('--db', type=str, help="text file with desired molecules, one per line")
 
 args = parser.parse_args()
+instr = Instrument(args)
 
 output_filename = os.path.join(os.getcwd(), os.path.expanduser(args.output))
 
@@ -94,13 +97,6 @@ def search_mz_candidates_pfg(mass, adducts, ppm_limit=5, charge=1):
 
     return _combine_results(dfs)
 
-# FIXME code duplication with NNMF
-def resolutionAt(mz):
-    if args.instrument == 'orbitrap':
-        return args.res200 * (200.0 / mz) ** 0.5
-    elif args.instrument == 'fticr':
-        return args.res200 * (200.0 / mz)
-
 class MoleculeAssigner(object):
     def __init__(self, target_database):
 
@@ -126,7 +122,7 @@ class MoleculeAssigner(object):
 
     def _keep_list(self, row, mzs_c, ints_c, ppm_t):
         theor_spec = IsotopePattern("{}+{}".format(row.mf, row.adduct))
-        theor_spec = theor_spec.centroids(resolutionAt(theor_spec.masses[0]))
+        theor_spec = theor_spec.centroids(instr.resolutionAt(theor_spec.masses[0]))
         theor_spec = theor_spec.charged(1).trimmed(5)
 
         prev_intensity = None
@@ -164,7 +160,7 @@ class MoleculeAssigner(object):
             ppm = ppms[-1]
             hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm)
             if len(hits) == 0:
-                print 'no hits for {}'.format(mz)
+                # print 'no hits for {}'.format(mz)
                 mzs_c = mzs_c[:-1]
                 ints_c = ints_c[:-1]
                 ppms = ppms[:-1]
@@ -207,9 +203,15 @@ for ii in range(H.shape[0]):
     print "coeff", ii
     coeff_spec = H[ii]
 
+    # compute centroids before fitting the spectrum;
+    # not doing so might result in multiple molecules assigned to almost the same mass
+    p = centroidize(np.array(mz_axis), np.array(coeff_spec))
+    mzs = p.masses
+    abundances = np.array(p.abundances) * max(coeff_spec)
+
     # FIXME make parameters adjustable
     detection_limit = 1e-3
-    spec_fit.append(assigner.fit_spectrum(mz_axis, nmf_ppms, coeff_spec, detection_limit))
+    spec_fit.append(assigner.fit_spectrum(mzs, nmf_ppms, abundances, detection_limit))
 
     sum_formulas = set([str(pyisocalc.parseSumFormula(x[1]['mf'])) for x in spec_fit[-1][0]])
     if len(spec_fit[-1][0]) > 0:

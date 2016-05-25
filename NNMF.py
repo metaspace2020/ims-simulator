@@ -6,9 +6,11 @@ import dask.array as da
 import numpy as np
 from toolz import partition_all
 
+from mz_axis import generate_mz_axis, Instrument
 from external.nnls import nnlsm_blockpivot
 
 import argparse
+import sys
 
 np.random.seed(24)
 
@@ -20,35 +22,15 @@ parser.add_argument('--res200', type=float, default=140000)
 parser.add_argument('--rank', type=int, default=40, help="desired factorization rank")
 
 args = parser.parse_args()
-import sys
 if args.rank < 10:
     sys.stdout.write("Factorization rank must be at least 10! Exiting.\n")
     sys.exit(1)
 
-def resolutionAt(mz):
-    if args.instrument == 'orbitrap':
-        return args.res200 * (200.0 / mz) ** 0.5
-    elif args.instrument == 'fticr':
-        return args.res200 * (200.0 / mz)
-
+instrument = Instrument(args)
 imzb = ImzbReader(args.input)
 
-def generate_mz_axis(mz_min, mz_max, step_size=5):
-    """
-    returns array of non-overlapping tuples (mz, ppm) that cover [mz_min, mz_max]
-    """
-    mz_axis = []
-    mz = mz_min
-    while mz < mz_max:
-        fwhm = mz / resolutionAt(mz)
-        step = step_size * fwhm
-        ppm = 1e6 * step / (2.0 * mz + step)
-        mz_axis.append((mz + step/2, ppm))
-        mz += step
-    return mz_axis
-
 # FIXME: read m/z range from the input file
-mz_axis = generate_mz_axis(100, 1000)
+mz_axis = generate_mz_axis(100, 1000, instrument, 1.0)
 print "Number of m/z bins:", len(mz_axis)
 
 def get_mz_images(mz_axis_chunk):

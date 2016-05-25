@@ -353,4 +353,4 @@ def readConfig(filename):
 
 if __name__ == '__main__':
     config = readConfig(sys.argv[1])
-    luigi.build([ComputeSimilarityMetrics(config)])
+    luigi.build([ComputeSimilarityMetrics(config)], local_scheduler=True)
