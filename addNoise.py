@@ -15,7 +15,7 @@ parser.add_argument('--instrument', type=str, default='orbitrap', choices=['orbi
 parser.add_argument('--res200', type=float, default=140000)
 
 args = parser.parse_args()
-# instr = Instrument(args)
+instr = Instrument(args)
 
 class NoiseGenerator(object):
     # FIXME dummy generator, does only centroiding with detection limit
@@ -36,6 +36,10 @@ class NoiseGenerator(object):
 
         order = mzs.argsort()
         return mzs[order], intensities[order]
+
+    def _jitterMzs(self, mzs):
+        # TODO
+        return mzs
 
 with open(args.stats) as stats:
     data = np.load(stats)

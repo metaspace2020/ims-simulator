@@ -3,7 +3,7 @@
 from pyimzml.ImzMLParser import ImzMLParser
 import numpy as np
 
-def spectralHistograms(imzml):
+def statistics(imzml):
     """
     Returns a dictionary:
 
@@ -12,12 +12,17 @@ def spectralHistograms(imzml):
 
     2) 'intensity':
     Histogram of centroid intensities
+
+    3) 'min_intensity'
+    Array of minimum centroid intensities for each spectrum
     """
     sparsity_hist_bins = np.linspace(-4, 1, 250)
     sparsity_hist = np.zeros(sparsity_hist_bins.shape[0] - 1, dtype=int)
 
     intensity_hist_bins = np.linspace(0, 10, 250)
     intensity_hist = np.zeros(intensity_hist_bins.shape[0] - 1, dtype=int)
+
+    min_intensities = []
 
     for i, coords in enumerate(imzml.coordinates):
         mzs, intensities = imzml.getspectrum(i)
@@ -27,12 +32,15 @@ def spectralHistograms(imzml):
         intensity_hist += np.histogram(np.log10(intensities),
                                        intensity_hist_bins)[0]
 
+        min_intensities.append(min(intensities))
+
     return {
         'sparsity': [sparsity_hist, sparsity_hist_bins],
-        'intensity': [intensity_hist, intensity_hist_bins]
+        'intensity': [intensity_hist, intensity_hist_bins],
+        'min_intensity': min_intensities
     }
 
-def plotHistograms(stats_real, stats_sim, key):
+def plotHistograms(stats_real, stats_sim, key, colors=['b', 'g']):
     """
     Plot statistic distribution for real and simulated data on the same plot.
     Key must be one of 'sparsityHist', 'intensityHist'.
@@ -51,8 +59,8 @@ def plotHistograms(stats_real, stats_sim, key):
     plt.figure(figsize=(12, 6))
 
     mzs = h0[1][:-1]
-    plt.fill_between(mzs, h0[0], color='b', alpha=0.5, label='Real')
-    plt.fill_between(mzs, h1[0], color='g', alpha=0.5, label='Simulated')
+    plt.fill_between(mzs, h0[0], color=colors[0], alpha=0.5, label='Real')
+    plt.fill_between(mzs, h1[0], color=colors[1], alpha=0.5, label='Simulated')
     plt.xlabel(xlabels[key])
     plt.ylabel("Peak counts")
     plt.legend()
@@ -69,11 +77,12 @@ if __name__ == '__main__':
 
     imzml = ImzMLParser(args.input)
 
-    histograms = spectralHistograms(imzml)
-    sparsityHist = histograms['sparsity']
-    intensityHist = histograms['intensity']
+    stats = statistics(imzml)
+    sparsityHist = stats['sparsity']
+    intensityHist = stats['intensity']
 
     with open(args.output, "w+") as f:
         np.savez_compressed(f,
                             sparsityHist=sparsityHist,
-                            intensityHist=intensityHist)
+                            intensityHist=intensityHist,
+                            minIntensities=stats['min_intensity'])
