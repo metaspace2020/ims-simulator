@@ -15,9 +15,9 @@ dependencies:
   - dask
   - pandas
   - lxml
-  - ims-cpp=0.1
+  - ims-cpp=0.2
   - pip:
-    - cpyImagingMSpec==0.0.4
+    - cpyImagingMSpec==0.0.5
     - cpyMSpec==0.1.4
     - pyMSpec==0.1
     - wheezy.template

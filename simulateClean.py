@@ -45,7 +45,7 @@ class SpectrumGenerator(object):
                 data['l'] = np.searchsorted(self.mz_axis, min(p.masses) - 0.5, 'l')
                 data['r'] = np.searchsorted(self.mz_axis, max(p.masses) + 1, 'r')
                 data['fwhm'] = p.masses[0] / data['resolution']
-                data['intensity'] = sf['mult'][0]
+                data['intensity'] = sf['mult']
                 self.isotope_patterns[i].append(data)
 
     def _computeEnvelopes(self):
@@ -105,7 +105,7 @@ def writeSimulatedFile(spectrum_generator, output_filename):
                 if np.isinf(sg.layers['min_intensities'][x, y]):
                     continue
                 mzs, intensities = simulate_spectrum(sg, x, y)
-                w.addSpectrum(mzs, intensities, [x / step_x, y])
+                w.addSpectrum(mzs, intensities, [x / step_x + 1, y + 1])
             print "{}% done".format(min(1.0, float(x + 1)/nx) * 100.0)
 
 writeSimulatedFile(sg, args.output)

@@ -97,6 +97,60 @@ def search_mz_candidates_pfg(mass, adducts, ppm_limit=5, charge=1):
 
     return _combine_results(dfs)
 
+class AnnotatedSpectrum(object):
+    def __init__(self, mzs_c, ints_c, ppms):
+        order = np.argsort(np.abs(ints_c))
+        self.mzs = np.asarray(mzs_c)[order]
+        self.ppms = np.asarray(ppms)[order]
+        self.ints = np.asarray(ints_c)[order]
+        self.orig_mzs = self.mzs
+        self._assigned_mzs = []
+
+    def trim(self, min_intensity):
+        self.mzs = self.mzs[self.ints >= detection_limit]
+        self.ppms = self.ppms[self.ints >= detection_limit]
+        self.ints = self.ints[self.ints >= detection_limit]
+
+    def top(self):
+        if len(self.mzs) == 0:
+            return (0, 0)
+        return self.mzs[-1], self.ppms[-1], self.ints[-1]
+
+    def pop(self):
+        self.mzs = self.mzs[:-1]
+        self.ints = self.ints[:-1]
+        self.ppms = self.ppms[:-1]
+
+    def assign(self, isotope_pattern, ppm):
+        theor_spec = isotope_pattern
+        prev_intensity = None
+        keep_list_all = np.ones_like(self.mzs, dtype=np.bool)
+        for m, a in zip(theor_spec.masses, theor_spec.abundances):
+            keep_list = 1e6 * np.abs(self.mzs - m) / m > ppm
+            keep_list_all &= keep_list
+            peak_list = np.where(np.logical_not(keep_list))[0]
+            if len(peak_list) == 0:
+                break
+            intensity = self.ints[peak_list].sum()
+            if prev_intensity and abs(intensity) > abs(prev_intensity):
+                break
+            prev_intensity = intensity
+
+        if np.all(keep_list_all):
+            print 'wtf'
+            self.pop()
+            return False
+        else:
+            self._assigned_mzs.append(self.mzs[np.logical_not(keep_list_all)])
+            self.mzs = self.mzs[keep_list_all]
+            self.ppms = self.ppms[keep_list_all]
+            self.ints = self.ints[keep_list_all]
+            return True
+
+    def assignedMzBins(self):
+        assigned_mzs = np.concatenate(self._assigned_mzs)
+        return np.searchsorted(self.orig_mzs, assigned_mzs)
+
 class MoleculeAssigner(object):
     def __init__(self, target_database):
 
@@ -109,85 +163,52 @@ class MoleculeAssigner(object):
         # to have some of the selected sum formulas from a predefined database;
         self._target_db = target_database
 
-    def _normalize_sf(self, sf):
+    def normalize_sf(self, sf):
         return str(pyisocalc.parseSumFormula(sf))
 
-    def _score_match(self, row, mzs_c, ints_c, ppm_t):
-        normalized_mf = self._normalize_sf(row.mf)
+    def _score_match(self, row, ppm_t):
+        normalized_mf = self.normalize_sf(row.mf)
         if normalized_mf in self._target_db:
             return 5
         if normalized_mf in self._already_assigned:
             return 10
         return 1
 
-    def _keep_list(self, row, mzs_c, ints_c, ppm_t):
-        theor_spec = IsotopePattern("{}+{}".format(row.mf, row.adduct))
-        theor_spec = theor_spec.centroids(instr.resolutionAt(theor_spec.masses[0]))
-        theor_spec = theor_spec.charged(1).trimmed(5)
+    def _centroids(self, row):
+        p = IsotopePattern("{}+{}".format(row.mf, row.adduct))
+        p = p.centroids(instr.resolutionAt(p.masses[0]))
+        p = p.charged(1).trimmed(5)
+        return p
 
-        prev_intensity = None
-        keep_list_all = np.ones_like(mzs_c, dtype=np.bool)
-        for m, a in zip(theor_spec.masses, theor_spec.abundances):
-            keep_list = 1e6 * np.abs(mzs_c - m) / m > ppm_t
-            keep_list_all &= keep_list
-            peak_list = np.where(np.logical_not(keep_list))[0]
-            if len(peak_list) == 0:
-                break
-            intensity = ints_c[peak_list].sum()
-            if prev_intensity and abs(intensity) > abs(prev_intensity):
-                break
-            prev_intensity = intensity
+    def fit_spectrum(self, mzs_c, ppms, ints_c, detection_limit, max_peaks=500):
+        annotated_spec = AnnotatedSpectrum(mzs_c, ints_c, ppms)
+        annotated_spec.trim(detection_limit)
+        annotated_spec.sf_list = []
 
-        return keep_list_all
-
-    def fit_spectrum(self, mzs_c, ppm, ints_c, detection_limit, max_peaks=500):
-        order = np.argsort(np.abs(ints_c))
-        mzs_c = np.asarray(mzs_c)[order]
-        ints_c = np.asarray(ints_c)[order]
-
-        mzs_c = mzs_c[ints_c >= detection_limit]
-        ints_c = ints_c[ints_c >= detection_limit]
-
-        n_peaks_initial = len(mzs_c)
-
-        sf_list = []
-
-        while len(mzs_c) > 0 and ints_c[-1] >= detection_limit:
-            mz = mzs_c[-1]
-            v = ints_c[-1]
+        while annotated_spec.top()[1] >= detection_limit:
+            mz, ppm, v = annotated_spec.top()
             hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm)
             if len(hits) == 0:
-                # print 'no hits for {}'.format(mz)
-                mzs_c = mzs_c[:-1]
-                ints_c = ints_c[:-1]
+                annotated_spec.pop()
                 continue
 
-            scores = [self._score_match(candidate, mzs_c, ints_c, ppm)
+            scores = [self._score_match(candidate, ppm)
                       for candidate in hits.itertuples()]
 
             best_hit_idx = np.argmax(scores)
             best_hit = hits.iloc[best_hit_idx]
 
-            keep_list = self._keep_list(best_hit, mzs_c, ints_c, ppm)
-            if np.all(keep_list):
-                print 'wtf'
-                mzs_c = mzs_c[:-1]
-                ints_c = ints_c[:-1]
+            theor_spec = self._centroids(best_hit)
+            if not annotated_spec.assign(theor_spec, ppm):
                 continue
 
-            mzs_c = mzs_c[keep_list]
-            ints_c = ints_c[keep_list]
+            annotated_spec.sf_list.append([v, best_hit])
+            self._already_assigned.add(self.normalize_sf(best_hit['mf']))
 
-            sf_list.append([v, best_hit])
-            self._already_assigned.add(self._normalize_sf(best_hit['mf']))
-
-            if len(sf_list) > max_peaks:
+            if len(annotated_spec.sf_list) > max_peaks:
                 break
 
-        stats = {}
-        stats['n_peaks_explained'] = n_peaks_initial - len(mzs_c)
-        stats['n_molecules'] = len(sf_list)
-        return sf_list, stats
+        return annotated_spec
 
 assigner = MoleculeAssigner(db)
 
@@ -197,19 +218,15 @@ for ii in range(H.shape[0]):
     print "coeff", ii
     coeff_spec = H[ii]
 
-    # compute centroids before fitting the spectrum;
-    # not doing so might result in multiple molecules assigned to almost the same mass
-    p = centroidize(np.array(mz_axis), np.array(coeff_spec))
-    mzs = p.masses
-    abundances = np.array(p.abundances) * max(coeff_spec)
-
     # FIXME make parameters adjustable
     detection_limit = 1e-3
-    spec_fit.append(assigner.fit_spectrum(mzs, 3, abundances, detection_limit))
+    fit = assigner.fit_spectrum(mz_axis, nmf_ppms, coeff_spec, detection_limit)
+    spec_fit.append(fit)
 
-    sum_formulas = set([str(pyisocalc.parseSumFormula(x[1]['mf'])) for x in spec_fit[-1][0]])
-    if len(spec_fit[-1][0]) > 0:
-        db_percentage.append(len(db & sum_formulas) / float(len(spec_fit[-1][0])))
+    sum_formulas = set([assigner.normalize_sf(x[1]['mf']) for x in fit.sf_list])
+
+    if len(fit.sf_list) > 0:
+        db_percentage.append(len(db & sum_formulas) / float(len(fit.sf_list)))
         print "database percentage in component", ii+1, ":", db_percentage[-1]
 
 print "median percentage of database formulas:", np.median(db_percentage)
@@ -217,11 +234,12 @@ print "median percentage of database formulas:", np.median(db_percentage)
 layers['layers_list'] = OrderedDict()
 for ii in range(len(spec_fit)):
     layers['layers_list'][ii] = {}
+    layers['layers_list'][ii]['assigned_mz_bins'] = spec_fit[ii].assignedMzBins()
     layers['layers_list'][ii]['image'] = W[:, ii].reshape(shape)[1:, 1:]
     layers['layers_list'][ii]['sf_list'] = []
-    for sf in spec_fit[ii][0]:
+    for sf in spec_fit[ii].sf_list:
         sf_a = "{}+{}".format(sf[1]['mf'], sf[1]['adduct'])
-        mult = [sf[0], ]
+        mult = sf[0]  # intensity
         layers['layers_list'][ii]['sf_list'].append({"sf_a": sf_a, "mult": mult})
 
 # save the layers for later analysis

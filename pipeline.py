@@ -286,15 +286,18 @@ class SimulateNoisyDataset(SimulationTask):
     # TODO
     def requires(self):
         return [SimulateCleanDataset(self.config),
-                ComputeStatistics(self.config)]
+                ComputeFactorization(self.config),
+                AssignMolecules(self.config)]
 
     def file_extension(self):
         return "sim.imzML"
 
     def program_args(self):
         return [self.internal_script("addNoise.py"),
+                self.imzml_fn,
                 self.input()[0].fn,
                 self.input()[1].fn,
+                self.input()[2].fn,
                 self.output_filename()]
 
 def simulatedDataFilename(config):

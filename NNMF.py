@@ -29,8 +29,11 @@ if args.rank < 10:
 instrument = Instrument(args)
 imzb = ImzbReader(args.input)
 
-# FIXME: read m/z range from the input file
-mz_axis = generate_mz_axis(100, 1000, instrument, 1.0)
+mz_range = (imzb.min_mz - 0.1, imzb.max_mz + 0.1)
+assert mz_range[0] > 0
+assert mz_range[1] > 1
+
+mz_axis = generate_mz_axis(mz_range[0], mz_range[1], instrument, 1.0)
 print "Number of m/z bins:", len(mz_axis)
 
 def get_mz_images(mz_axis_chunk):
