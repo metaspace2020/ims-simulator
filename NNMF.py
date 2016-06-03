@@ -65,7 +65,7 @@ image_intensities = arr.sum(axis=(1, 2)).compute()
 N_bright = 500
 bright_images_pos = image_intensities.argsort()[::-1][:N_bright]
 mz_axis_pos = np.array(mz_axis)[bright_images_pos]
-arr_pos = arr[bright_images_pos]
+arr_pos = np.array(arr[bright_images_pos])
 print "Selected top", N_bright, "brightest images for NNMF"
 print arr_pos.shape
 
@@ -95,7 +95,7 @@ print "Running non-negative matrix factorization"
 R = x
 while len(cols) < r:
     # print "detection"
-    p = da.random.random(x.shape[0], chunks=x.shape[0])
+    p = np.random.random(x.shape[0])
     scores = (R * x).sum(axis=0)
     scores /= p.T.dot(x)
     scores = np.array(scores)
@@ -106,15 +106,15 @@ while len(cols) < r:
     print "picked {}/{} columns".format(len(cols), r)
 
     H = nnls_frob(x, x[:, cols])
-    R = x - da.dot(x[:, cols], da.from_array(H, H.shape))
+    R = x - np.dot(x[:, cols], H)
 
     if len(cols) > 0 and len(cols) % 5 == 0:
-        residual_error = da.vnorm(R, 'fro').compute() / da.vnorm(x, 'fro').compute()
+        residual_error = np.linalg.norm(R, 'fro') / np.linalg.norm(x, 'fro')
         print "relative error is", residual_error
 
 W = np.array(x[:, cols])
 
-residual_error = da.vnorm(R, 'fro').compute() / da.vnorm(x, 'fro').compute()
+residual_error = np.linalg.norm(R, 'fro') / np.linalg.norm(x, 'fro')
 print "Finished column picking, relative error is", residual_error
 
 print "Projecting all m/z bin images on the obtained basis..."
