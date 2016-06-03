@@ -32,6 +32,10 @@ class NoiseGenerator(object):
         for mz, ppm in self._mz_axis:
             self._mz_bins.append(mz * (1.0 + 1e-6 * ppm))
 
+        # self._removeAssignedBins(layers_fn)
+
+    def _removeAssignedBins(self, layers_fn):
+        # buggy at the moment
         with open(layers_fn, 'rb') as f:
             layers = cPickle.load(f)
         for i in layers['layers_list']:
