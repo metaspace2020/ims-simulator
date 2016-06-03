@@ -1,13 +1,12 @@
 import luigi
 
 import pandas as pd
+import yaml  # for parsing config file
 
 from os.path import splitext, basename, expanduser
 import subprocess
 import tempfile
 import shutil
-from collections import OrderedDict
-import json
 import sys
 import os
 
@@ -338,12 +337,12 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
         return SimulateNoisyDataset(self.config)
 
     def output(self):
-        return luigi.LocalTarget("simulated_{}_config.json".format(get_id(self.config)))
+        return luigi.LocalTarget("simulated_{}_config.yaml".format(get_id(self.config)))
 
     def run(self):
         with self.output().open("w") as f:
             simulation_config = unfreeze(simulatedDataConfig(self.config))
-            json.dump(simulation_config, f)
+            yaml.dump(simulation_config, f)
 
 class SimulateAndRunFullPipeline(luigi.Task):
     config = luigi.DictParameter()
@@ -369,9 +368,16 @@ class ComputeSimilarityMetrics(luigi.WrapperTask):
                 CreateAnnotationConfigForSimulatedData(self.config),
                 RunFullPipeline(simulatedDataConfig(self.config))]
 
+def _ordered_dict(loader, node):
+    loader.flatten_mapping(node)
+    return luigi.parameter.FrozenOrderedDict(loader.construct_pairs(node))
+
+yaml.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+                     _ordered_dict)
+
 def readConfig(filename):
     with open(filename) as conf:
-        config = json.load(conf, object_pairs_hook=luigi.parameter.FrozenOrderedDict)
+        config = yaml.load(conf)
 
     cfg = config.get_wrapped()
     cfg['imzml'] = expanduser(config['imzml'])

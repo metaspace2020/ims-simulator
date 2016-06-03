@@ -22,4 +22,5 @@ dependencies:
     - pyMSpec==0.1
     - wheezy.template
     - luigi
+    - pyyaml
     - git+https://github.com/alexandrovteam/pyimzML.git@494f52e1519fcf820bf89f19f28344ddea45d3cf # TODO: package on PyPI
