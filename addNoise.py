@@ -73,7 +73,8 @@ class NoiseGenerator(object):
         spec = map(np.array, profile_spectrum)
         p = centroidize(*spec)
         mzs = np.array(p.masses)
-        intensities = np.array(p.abundances) * spec[1].max()
+        mult = spec[1].max() if len(spec[1]) > 0 else 1
+        intensities = np.array(p.abundances) * mult
 
         noise_mzs, noise_intensities = self.generateNoise(*coords)
         mzs = np.concatenate([mzs, noise_mzs])
