@@ -29,15 +29,12 @@ def unfreeze(x):
         return x
 
 def get_id(obj):
-    try:
-        return str(abs(hash(obj)))[:8]
-    except:
-        # horrible hacks to get a hash for luigi.DictParameter
-        if type(obj) == luigi.parameter.FrozenOrderedDict:
-            obj = unfreeze(obj)
+    # horrible hacks to get a hash for luigi.DictParameter
+    if type(obj) == luigi.parameter.FrozenOrderedDict:
+        obj = unfreeze(obj)
 
-        import json
-        return str(abs(hash(json.dumps(obj))))[:8]
+    import json
+    return str(hash(json.dumps(obj)) % 100000000)
 
 def get_prefix(path):
     return splitext(basename(path))[0]
@@ -247,6 +244,9 @@ class AssignMolecules(SimulationTask):
     def requires(self):
         return ComputeFactorization(self.config)
 
+    def depends_on(self):
+        return ['instrument', 'database', 'factorization']
+
     def file_extension(self):
         return "layers"
 
@@ -275,6 +275,9 @@ class SimulateCleanDataset(SimulationTask):
     def file_extension(self):
         return "sim_profile_clean.imzML"
 
+    def depends_on(self):
+        return ['instrument', 'database', 'factorization']
+
     def program_args(self):
         return [self.internal_script("simulateClean.py"),
                 self.input().fn, self.output_filename(),
@@ -282,11 +285,10 @@ class SimulateCleanDataset(SimulationTask):
                 "--res200", self.instrument['res200']]
 
 class SimulateNoisyDataset(SimulationTask):
-    # TODO
     def requires(self):
         return [SimulateCleanDataset(self.config),
                 ComputeFactorization(self.config),
-                AssignMolecules(self.config)]
+                GenerateGroundtruth(self.config)]
 
     def file_extension(self):
         return "sim.imzML"
@@ -297,6 +299,22 @@ class SimulateNoisyDataset(SimulationTask):
                 self.input()[0].fn,
                 self.input()[1].fn,
                 self.input()[2].fn,
+                self.output_filename(),
+                "--inflate-noise", self.config['noise']['inflation']]
+
+class GenerateGroundtruth(SimulationTask):
+    def file_extension(self):
+        return "groundtruth"
+
+    def depends_on(self):
+        return ['instrument', 'database', 'factorization']
+
+    def requires(self):
+        return AssignMolecules(self.config)
+
+    def program_args(self):
+        return [self.internal_script("layersToGroundtruth.py"),
+                self.input().fn,
                 self.output_filename()]
 
 def simulatedDataFilename(config):
@@ -306,28 +324,31 @@ def simulatedDataConfig(config):
     return luigi.parameter.FrozenOrderedDict(
         imzml=simulatedDataFilename(config),
         database=config['database'],
-        instrument=config['instrument']
+        instrument=config['instrument'],
+        grountruth=GenerateGroundtruth(config).output_filename()
     )
 
-class RunFullPipeline(luigi.Task):
-    config = luigi.DictParameter()
-    # TODO: add groundtruth parameter (once noise metrics are in place)
-
+class RunFullPipeline(SimulationTask):
     def requires(self):
         imzml = self.config['imzml']
         instrument = self.config['instrument']
         db = self.config['database']
+        if 'grountruth' in self.config:
+            groundtruth_fn = self.config['grountruth']
+        else:
+            groundtruth_fn = None
 
-        return {adduct: ComputeFDR(imzml, instrument, db, adduct)
+        return {adduct: ComputeFDR(imzml, instrument,
+                                   db, adduct, groundtruth_fn)
                 for adduct in db['adducts']}
 
-    def output(self):
-        return luigi.LocalTarget(get_id(self.config) + "_fdr_completed.txt")
+    def file_extension(self):
+        return "stats"  # TODO: prepare a proper PDF report
 
-    def run(self):
-        with self.output().open("w") as f:
-            for adduct in self.input():
-                f.write("{},{}\n".format(adduct, self.input()[adduct].fn))
+    def program_args(self):
+        return [self.internal_script("collectStats.py"),
+                self.config['imzml'],
+                self.output_filename()]
 
 class CreateAnnotationConfigForSimulatedData(luigi.Task):
     config = luigi.DictParameter()
@@ -388,4 +409,5 @@ def readConfig(filename):
 
 if __name__ == '__main__':
     config = readConfig(sys.argv[1])
+    print config
     luigi.build([ComputeSimilarityMetrics(config)], local_scheduler=True)

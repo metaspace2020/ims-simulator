@@ -14,6 +14,7 @@ parser.add_argument('simclean', type=str, help="input file produced by simulateC
 parser.add_argument('nmf', type=str, help="factorization file produced by NNMF.py")
 parser.add_argument('layers', type=str, help="layers file produces by assignMolecules.py")
 parser.add_argument('output', type=str, help="output filename (centroided .imzML)")
+parser.add_argument('--inflate-noise', type=float, default=1.0, help="noise inflation")
 
 args = parser.parse_args()
 
@@ -64,7 +65,7 @@ class NoiseGenerator(object):
         binned_approx_intensities = self._W[x, y, :].dot(self._H)
         noise = np.abs(binned_real_intensities - binned_approx_intensities)
         # FIXME: avoid duplicating noise
-        noise_intensities = noise[bins]
+        noise_intensities = noise[bins] * args.inflate_noise
         noise_mzs = np.array(real_mzs)
         nnz = noise_intensities > min(real_intensities) / 2
         return noise_mzs[nnz], noise_intensities[nnz]
