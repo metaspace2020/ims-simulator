@@ -325,7 +325,9 @@ def simulatedDataConfig(config):
         imzml=simulatedDataFilename(config),
         database=config['database'],
         instrument=config['instrument'],
-        grountruth=GenerateGroundtruth(config).output_filename()
+        grountruth=GenerateGroundtruth(config).output_filename(),
+        factorization=config['factorization'],
+        noise=config['noise']
     )
 
 class RunFullPipeline(SimulationTask):
