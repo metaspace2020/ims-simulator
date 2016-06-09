@@ -7,13 +7,12 @@ Scripts for simulating high-resolution imaging mass spectrometry datasets.
 1. Install miniconda for Python 2.7 (http://conda.pydata.org/miniconda.html)
 2. Run `conda env create` which will grab all necessary packages
 3. Run `source activate ims_simulator`
+4. Install [PFG](https://github.com/zmzhang/PFG) manually (**FIXME:** package it for Anaconda Cloud)
 
-## Pipeline steps to get a simulated .imzML from a real .imzML
+## How to get a simulated .imzML from a real .imzML
 
-1. Run `ims convert <real.imzML> <real.imzb>` to get an m/z-sorted file in an internal format
-2. Run NNMF.py script to produce a numpy-readable NMF factorization from `<real.imzb>`
-3. Run assignMolecules.py script to assign some molecules to the peaks from NMF factorization
-4. Run simulate.py to generate an output .imzML from the layers produced in the previous step
+1. Copy `example_config.yaml` and edit it as needed. The most important bit is to specify the .imzML filename.
+2. Run `python pipeline.py <your config.yaml>` and wait. In about an hour it should successfully finish.
 
 # License
 
