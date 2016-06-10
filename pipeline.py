@@ -55,7 +55,11 @@ class CmdlineTask(luigi.Task):
     def internal_script(self, name):
         return os.path.join(os.path.dirname(__file__), name)
 
+    def before_run(self):
+        pass
+
     def run(self):
+        self.before_run()
         args = [str(arg) for arg in self.program_args()]
 
         if self.output_is_stdout():
@@ -69,6 +73,7 @@ class CmdlineTask(luigi.Task):
 class CreateIsotopeDB(CmdlineTask):
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
+    groundtruth_fn = luigi.DictParameter('')
 
     def output_filename(self):
         db_name = get_prefix(self.molecular_db['sum_formulas_fn'])
@@ -78,14 +83,32 @@ class CreateIsotopeDB(CmdlineTask):
                                      get_id(self.molecular_db))
         if self.molecular_db['is_decoy']:
             fn += ".decoy"
+        if self.groundtruth_fn:
+            fn += ".gro" + get_id(self.groundtruth_fn)
         return fn
+
+    def before_run(self):
+        self._sum_formulas_fn = self.molecular_db['sum_formulas_fn']
+        if self.groundtruth_fn and not self.molecular_db['is_decoy']:
+            all_sfs = set()
+            with open(self.molecular_db['sum_formulas_fn']) as in1:
+                for l in in1:
+                    all_sfs.add(l.strip())
+            with open(self.groundtruth_fn) as in2:
+                for l in in2:
+                    all_sfs.add(l.split(',')[0])
+
+            self._sum_formulas_fn += ".gro" + get_id(self.groundtruth_fn)
+            with open(self._sum_formulas_fn, "w+") as out:
+                for sf in all_sfs:
+                    out.write("{}\n".format(sf))
 
     def program_args(self):
         return ['ims', 'isocalc',
                 '--instrument', self.instrument['type'],
                 '--resolution', self.instrument['res200'],
                 '--adducts', ",".join(self.molecular_db['adducts']),
-                self.molecular_db['sum_formulas_fn'],
+                self._sum_formulas_fn,
                 self.output_filename()]
 
 class ConvertImzMLToImzb(CmdlineTask):
@@ -102,16 +125,19 @@ class RunAnnotation(CmdlineTask):
     imzml_fn = luigi.Parameter()
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
+    groundtruth_fn = luigi.Parameter('')
 
     def requires(self):
         return {
             'imzb': ConvertImzMLToImzb(self.imzml_fn),
-            'isotope_db': CreateIsotopeDB(self.instrument, self.molecular_db),
+            'isotope_db': CreateIsotopeDB(self.instrument, self.molecular_db, self.groundtruth_fn),
         }
 
     def output_filename(self):
         db_id = get_id(self.molecular_db) + "."
         db_id += 'decoy' if self.molecular_db['is_decoy'] else 'target'
+        if self.groundtruth_fn:
+            db_id += "_gro" + get_id(self.groundtruth_fn)
         return get_prefix(self.imzml_fn) + ".results.db" + db_id + "_ins" + get_id(self.instrument)
 
     def output_is_stdout(self):
@@ -127,9 +153,11 @@ class GetAnnotationsForAdduct(luigi.Task):
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
     adduct = luigi.Parameter()  # empty means annotations for all adducts
+    groundtruth_fn = luigi.Parameter()
 
     def requires(self):
-        return RunAnnotation(self.imzml_fn, self.instrument, self.molecular_db)
+        return RunAnnotation(self.imzml_fn, self.instrument, self.molecular_db,
+                             self.groundtruth_fn)
 
     def _output_filename(self):
         if self.adduct:
@@ -151,13 +179,12 @@ class ComputeFDR(CmdlineTask):
     imzml_fn = luigi.Parameter()
     instrument = luigi.DictParameter()
     molecular_db = luigi.DictParameter()
-
     adduct = luigi.Parameter('')
     groundtruth_fn = luigi.Parameter('')
 
     def requires(self):
         return {
-            'target_results': GetAnnotationsForAdduct(self.imzml_fn, self.instrument, self.molecular_db, self.adduct),
+            'target_results': GetAnnotationsForAdduct(self.imzml_fn, self.instrument, self.molecular_db, self.adduct, self.groundtruth_fn),
             'decoy_results': RunAnnotation(self.imzml_fn, self.instrument, self._decoy_molecular_db())
         }
 
