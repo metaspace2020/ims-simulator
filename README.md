@@ -9,18 +9,20 @@ Scripts for simulating high-resolution imaging mass spectrometry datasets.
 3. Run `source activate ims_simulator`
 4. Install PFG from https://github.com/zmzhang/PFG (**FIXME:** package it for Anaconda Cloud)
    1.  Clone PFG e.g. 
-        ```
+   
+        ```bash
         mkdir pfg
         cd pfg
-        git clone  https://github.com/zmzhang/PFG
+        git clone https://github.com/zmzhang/PFG
         ```
    2. install
-      ``` 
+      ```bash
       cd PFG
       make
       ```
-      note. on mac install gcc-5 with ``brew install gcc``` and edit Makefile 
-      ```
+      Note: on Mac install gcc-5 with ``brew install gcc``` and edit Makefile 
+      
+      ```bash
       CC          = gcc-5
       CXX         = g++-5
       ```
