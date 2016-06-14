@@ -115,7 +115,7 @@ class ConvertImzMLToImzb(CmdlineTask):
     imzml_fn = luigi.Parameter()
 
     def output_filename(self):
-        return splitext(self.imzml_fn)[0] + ".imzb"
+        return get_prefix(self.imzml_fn) + ".imzb"
 
     def program_args(self):
         return ['ims', 'convert',
