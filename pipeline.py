@@ -9,6 +9,7 @@ import tempfile
 import shutil
 import sys
 import os
+import pickle
 
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
@@ -25,6 +26,10 @@ class AdductListParameter(luigi.Parameter):
 def unfreeze(x):
     if type(x) == luigi.parameter.FrozenOrderedDict:
         return {k: unfreeze(x[k]) for k in x}
+    elif type(x) == tuple:
+        return tuple([unfreeze(k) for k in x])
+    elif type(x) == list:
+        return [unfreeze(k) for k in x]
     else:
         return x
 
@@ -58,6 +63,9 @@ class CmdlineTask(luigi.Task):
     def before_run(self):
         pass
 
+    def after_run(self):
+        pass
+
     def run(self):
         self.before_run()
         args = [str(arg) for arg in self.program_args()]
@@ -69,6 +77,7 @@ class CmdlineTask(luigi.Task):
             shutil.move(f.name, self.output_filename())
         else:
             subprocess.check_call(args)
+        self.after_run()
 
 class CreateIsotopeDB(CmdlineTask):
     instrument = luigi.DictParameter()
@@ -236,7 +245,7 @@ class SimulationTask(CmdlineTask):
 
     @property
     def molecular_db(self):
-        return self.config['database']
+        return self.config['annotation']['database']
 
     def depends_on(self):
         return [k for k in self.config.keys() if k != 'imzml']
@@ -272,7 +281,7 @@ class AssignMolecules(SimulationTask):
         return ComputeFactorization(self.config)
 
     def depends_on(self):
-        return ['instrument', 'database', 'factorization']
+        return ['instrument', 'annotation', 'factorization']
 
     def file_extension(self):
         return "layers"
@@ -282,7 +291,19 @@ class AssignMolecules(SimulationTask):
                 self.input().fn, self.output_filename(),
                 "--instrument", self.instrument['type'],
                 "--res200", self.instrument['res200'],
+                "--dynrange", self.config['annotation'].get('dynrange', 1000),
                 "--db", self.molecular_db['sum_formulas_fn']]
+
+    def after_run(self):
+        with open(self.output_filename(), "r") as f:
+            layers = pickle.load(f)
+        if 'extra' in self.config['annotation']:
+            for ion in self.config['annotation']['extra']:
+                layers['layers_list'][ion['component']]['sf_list'].append(
+                    {'sf_a': ion['sf'] + ion['adduct'],
+                     'mult': ion['intensity'] / 100.0})
+        with open(self.output_filename(), "w+") as f:
+            pickle.dump(layers, f)
 
 class ComputeStatistics(SimulationTask):
     def file_extension(self):
@@ -303,7 +324,7 @@ class SimulateCleanDataset(SimulationTask):
         return "sim_profile_clean.imzML"
 
     def depends_on(self):
-        return ['instrument', 'database', 'factorization']
+        return ['instrument', 'annotation', 'factorization']
 
     def program_args(self):
         return [self.internal_script("simulateClean.py"),
@@ -334,7 +355,7 @@ class GenerateGroundtruth(SimulationTask):
         return "groundtruth"
 
     def depends_on(self):
-        return ['instrument', 'database', 'factorization']
+        return ['instrument', 'annotation', 'factorization']
 
     def requires(self):
         return AssignMolecules(self.config)
@@ -350,7 +371,7 @@ def simulatedDataFilename(config):
 def simulatedDataConfig(config):
     return luigi.parameter.FrozenOrderedDict(
         imzml=simulatedDataFilename(config),
-        database=config['database'],
+        annotation=config['annotation'],
         instrument=config['instrument'],
         grountruth=GenerateGroundtruth(config).output_filename(),
         factorization=config['factorization'],
@@ -361,7 +382,7 @@ class RunFullPipeline(SimulationTask):
     def requires(self):
         imzml = self.config['imzml']
         instrument = self.config['instrument']
-        db = self.config['database']
+        db = self.config['annotation']['database']
         if 'grountruth' in self.config:
             groundtruth_fn = self.config['grountruth']
         else:
@@ -431,9 +452,11 @@ def readConfig(filename):
 
     cfg = config.get_wrapped()
     cfg['imzml'] = expanduser(config['imzml'])
-    cfg['database'].get_wrapped()['sum_formulas_fn'] = expanduser(config['database']['sum_formulas'])
-    cfg['database'].get_wrapped()['adducts'] = tuple(cfg['database']['adducts'])
-    cfg['database'].get_wrapped()['is_decoy'] = False
+    cfg['annotation']['database'].get_wrapped()['sum_formulas_fn'] = expanduser(config['annotation']['database']['sum_formulas'])
+    cfg['annotation']['database'].get_wrapped()['adducts'] = tuple(cfg['annotation']['database']['adducts'])
+    if 'extra' in cfg['annotation']:
+        cfg['annotation'].get_wrapped()['extra'] = tuple(cfg['annotation']['extra'])
+    cfg['annotation']['database'].get_wrapped()['is_decoy'] = False
     return config
 
 if __name__ == '__main__':

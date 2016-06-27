@@ -20,9 +20,12 @@ parser.add_argument('output', type=str, help="output file with images and molecu
 parser.add_argument('--instrument', type=str, default='orbitrap', choices=['orbitrap', 'fticr'])
 parser.add_argument('--res200', type=float, default=140000)
 parser.add_argument('--db', type=str, help="text file with desired molecules, one per line")
+parser.add_argument("--dynrange", type=float, default=1000, help="dynamic range: influences how many peaks in each component will be annotated")
 
 args = parser.parse_args()
 instr = Instrument(args)
+assert(args.dynrange > 1)
+detection_limit = 1.0 / args.dynrange
 
 output_filename = os.path.join(os.getcwd(), os.path.expanduser(args.output))
 
@@ -217,9 +220,6 @@ db_percentage = []
 for ii in range(H.shape[0]):
     print "coeff", ii
     coeff_spec = H[ii]
-
-    # FIXME make parameters adjustable
-    detection_limit = 1e-3
     fit = assigner.fit_spectrum(mz_axis, nmf_ppms, coeff_spec, detection_limit)
     spec_fit.append(fit)
 

@@ -3,12 +3,23 @@
     type: "fticr"   # currently 'fticr' and 'orbitrap' are supported
     res200: 250000  # resolution at m/z = 200
   imzml: "~/metabolomics/14_04_29_Regenwurm_pos_centroid.imzML"
-  database:
-    sum_formulas: "~/metabolomics/chebi_metabolites.txt"
-    adducts:        # FIXME: negative adducts probably don't work yet
-      - "+H"
-      - "+K"
-      - "+Na"
+  annotation:       # parameters for assigning molecules to peaks
+    dynrange: 1000
+    database:
+      sum_formulas: "~/metabolomics/chebi_metabolites.txt"
+      adducts:      # FIXME: negative adducts probably don't work yet
+        - "+H"
+        - "+K"
+        - "+Na"
+    extra:          # user-provided list of ions
+      - sf: "C6H15N2O"
+        adduct: "+K"
+        intensity: 80    # maximum is 100
+        component: 0     # components are counted starting from zero
+      - sf: "C10H20NO3"
+        adduct: "+H"
+        intensity: 30
+        component: 2
   factorization:
     rank: 30        # how many layers to generate
   noise:
