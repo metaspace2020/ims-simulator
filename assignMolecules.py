@@ -36,9 +36,6 @@ if args.db:
         db.add(sf_str)
     print "target database size:", len(db)
 
-# FIXME: put it to conda or use chemcalc
-pfg_executable_dir = os.path.expanduser("~/github/PFG")
-
 layers = {}
 noise = {}
 
@@ -73,15 +70,13 @@ def _combine_results(dfs):
 
 # FIXME: make it work for negative mode
 def search_mz_candidates_pfg(mass, adducts, ppm_limit=5, charge=1):
-    os.chdir(pfg_executable_dir)
-
     dfs = []
     for adduct in adducts:
         mass_ = mass - IsotopePattern(adduct).charged(charge).masses[0]
-        cmd_line = ("OMP_NUM_THREADS=2 ./PFG -m {} -t {} " +
+        cmd_line = ("OMP_NUM_THREADS=2 PFG -m {} -t {} " +
                     "--C 0-100 --H 0-100 --N 0-10 --O 0-10 --S 0-5 --P 0-5 -r 'lewis'").format(mass_, ppm_limit)
         _ = subprocess.check_output(cmd_line, shell=True)
-        results = open(os.path.join(pfg_executable_dir, "result.txt")).readlines()[1:]
+        results = open("result.txt").readlines()[1:]
         results = zip(*[s.split() for s in results])
         if not results:
             continue

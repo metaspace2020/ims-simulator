@@ -2,7 +2,7 @@ name: ims_simulator
 
 channels:
   # TODO: create alexandrovteam account on Anaconda.org and move stuff there
-  - lomereiter # for ims cmdline tool
+  - lomereiter # for ims and PFG cmdline tools
 
 dependencies:
   - python=2.7
@@ -16,6 +16,7 @@ dependencies:
   - pandas
   - lxml
   - ims-cpp=0.2
+  - PFG=0.1
   - pip:
     - cpyImagingMSpec==0.0.5
     - cpyMSpec==0.1.4
