@@ -12,6 +12,7 @@ Scripts for simulating high-resolution imaging mass spectrometry datasets.
 
 1. Copy `example_config.yaml` and edit it as needed. The most important bit is to specify the .imzML filename.
 2. Run `python pipeline.py <your config.yaml>` and wait. In about an hour it should successfully finish.
+3. If the run completes without errors, you will find a file named `report_<config hash>.pdf` along with the generated `imzML` file. It contains some useful metrics for comparing simulated and original datasets.
 
 # License
 

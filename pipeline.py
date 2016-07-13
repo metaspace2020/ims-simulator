@@ -378,6 +378,18 @@ def simulatedDataConfig(config):
         noise=config['noise']
     )
 
+class ComputeBasicStats(SimulationTask):
+    def depends_on(self):
+        return ['imzml']
+
+    def file_extension(self):
+        return "stats"
+
+    def program_args(self):
+        return [self.internal_script("collectStats.py"),
+                self.config['imzml'],
+                self.output_filename()]
+
 class RunFullPipeline(SimulationTask):
     def requires(self):
         imzml = self.config['imzml']
@@ -388,17 +400,29 @@ class RunFullPipeline(SimulationTask):
         else:
             groundtruth_fn = None
 
-        return {adduct: ComputeFDR(imzml, instrument,
-                                   db, adduct, groundtruth_fn)
-                for adduct in db['adducts']}
+        return {
+            'fdr': {
+                adduct: ComputeFDR(imzml, instrument, db, adduct, groundtruth_fn)
+                for adduct in db['adducts']
+            },
+            'stats': ComputeBasicStats(self.config),
+            'nnmf': ComputeFactorization(self.config)
+        }
 
     def file_extension(self):
-        return "stats"  # TODO: prepare a proper PDF report
+        return "output_locations"
 
-    def program_args(self):
-        return [self.internal_script("collectStats.py"),
-                self.config['imzml'],
-                self.output_filename()]
+    def run(self):
+        paths = {
+            'stats': self.input()['stats'].fn,
+            'nnmf': self.input()['nnmf'].fn
+        }
+
+        fdr = self.input()['fdr']
+        paths['fdr'] = {a: fdr[a].fn for a in fdr}
+
+        with open(self.output_filename(), "w+") as f:
+            yaml.dump(paths, f)
 
 class CreateAnnotationConfigForSimulatedData(luigi.Task):
     config = luigi.DictParameter()
@@ -415,29 +439,71 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
             simulation_config = unfreeze(simulatedDataConfig(self.config))
             yaml.dump(simulation_config, f)
 
-class SimulateAndRunFullPipeline(luigi.Task):
+def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
+    import numpy as np
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.pyplot as plt
+    plt.ioff()
+
+    orig = yaml.load(open(orig_yaml_fn))
+    sim = yaml.load(open(sim_yaml_fn))
+
+    def loadStats(path):
+        result = {}
+        with open(path) as fin:
+            with np.load(fin) as d:
+                result['sparsityHist'] = d['sparsityHist']
+                result['intensityHist'] = d['intensityHist']
+        return result
+
+    orig_stats = loadStats(orig['stats'])
+    sim_stats = loadStats(sim['stats'])
+
+    def plotSparsityHistogram(stats, real=True):
+        count, logdist = stats['sparsityHist'][:2]
+        plt.plot(logdist[:-1], count)
+        plt.title("Sparsity histogram for {} data".format('real' if real else 'simulated'))
+        plt.xlabel("log10(distance between adjacent centroids)")
+        plt.ylabel("peak count")
+
+    def plotIntensityHistogram(stats, real=True):
+        count, logint = stats['intensityHist'][:2]
+        plt.plot(logint[:-1], count)
+        plt.title("Intensity histogram for {} data".format('real' if real else 'simulated'))
+        plt.xlabel("log10(peak intensity)")
+        plt.ylabel("peak count")
+
+    def createFigure():
+        return plt.figure(figsize=(8.27, 11.69), dpi=100)  # A4 format
+
+    def saveFigure(fig, pdf):
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+    with PdfPages(output_filename) as pdf:
+        for plotFunc in [plotSparsityHistogram, plotIntensityHistogram]:
+            fig = createFigure()
+            plt.subplot(2, 1, 1)
+            plotFunc(orig_stats, real=True)
+            plt.subplot(2, 1, 2)
+            plotFunc(sim_stats, real=False)
+            saveFigure(fig, pdf)
+
+class ComputeSimilarityMetrics(luigi.Task):
     config = luigi.DictParameter()
 
     def requires(self):
-        return CreateAnnotationConfigForSimulatedData(self.config)
-
-    def _pipeline(self):
-        return RunFullPipeline(simulatedDataConfig(self.config))
+        return {'original': RunFullPipeline(self.config),
+                'sim_config': CreateAnnotationConfigForSimulatedData(self.config),
+                'simulated': RunFullPipeline(simulatedDataConfig(self.config))}
 
     def output(self):
-        return self._pipeline().output()
+        return luigi.LocalTarget("report_{}.pdf".format(get_id(self.config)))
 
     def run(self):
-        self._pipeline().run()
-
-# TODO
-class ComputeSimilarityMetrics(luigi.WrapperTask):
-    config = luigi.DictParameter()
-
-    def requires(self):
-        return [RunFullPipeline(self.config),
-                CreateAnnotationConfigForSimulatedData(self.config),
-                RunFullPipeline(simulatedDataConfig(self.config))]
+        generateReport(self.input()['original'].fn, self.input()['simulated'].fn,
+                       self.output().fn)
 
 def _ordered_dict(loader, node):
     loader.flatten_mapping(node)

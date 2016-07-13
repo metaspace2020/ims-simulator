@@ -135,7 +135,7 @@ class AnnotatedSpectrum(object):
             prev_intensity = intensity
 
         if np.all(keep_list_all):
-            print 'wtf'
+            # print 'wtf'
             self.pop()
             return False
         else:

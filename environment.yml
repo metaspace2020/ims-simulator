@@ -17,6 +17,7 @@ dependencies:
   - lxml
   - ims-cpp=0.2
   - PFG=0.1
+  - matplotlib
   - pip:
     - cpyImagingMSpec==0.0.5
     - cpyMSpec==0.1.4
