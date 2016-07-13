@@ -443,6 +443,9 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
     import numpy as np
     from matplotlib.backends.backend_pdf import PdfPages
     import matplotlib.pyplot as plt
+    from matplotlib.cm import viridis as cmap
+    from sklearn.neighbors import NearestNeighbors
+
     plt.ioff()
 
     orig = yaml.load(open(orig_yaml_fn))
@@ -456,8 +459,34 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
                 result['intensityHist'] = d['intensityHist']
         return result
 
+    def loadNNMF(fn):
+        with open(fn) as f:
+            with np.load(f) as d:
+                return {'W': d['W'], 'H': d['H'], 'shape': d['shape'],
+                        'mz_axis': np.array([x[0] for x in d['mz_axis']])}
+
     orig_stats = loadStats(orig['stats'])
     sim_stats = loadStats(sim['stats'])
+
+    orig_nnmf = loadNNMF(orig['nnmf'])
+    sim_nnmf = loadNNMF(sim['nnmf'])
+
+    def getImageComponents(nnmf):
+        return nnmf['W'].T
+
+    common_mz_axis = np.arange(min(min(orig_nnmf['mz_axis']),
+                                   min(sim_nnmf['mz_axis'])),
+                               max(max(orig_nnmf['mz_axis']),
+                                   max(sim_nnmf['mz_axis'])),
+                               0.01)
+
+    def getSpectralComponents(nnmf):
+        axis_len = len(common_mz_axis)
+        result = np.zeros((len(nnmf['H']), axis_len))
+        indices = np.digitize(nnmf['mz_axis'], common_mz_axis)
+        for i, h in enumerate(nnmf['H']):
+            result[i, :] = np.bincount(indices, h, minlength=axis_len)[:axis_len]
+        return result
 
     def plotSparsityHistogram(stats, real=True):
         count, logdist = stats['sparsityHist'][:2]
@@ -472,6 +501,21 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
         plt.title("Intensity histogram for {} data".format('real' if real else 'simulated'))
         plt.xlabel("log10(peak intensity)")
         plt.ylabel("peak count")
+
+    def plotComponentSimilarity(factor):
+        nn1 = NearestNeighbors(n_neighbors=1, algorithm='brute', metric='cosine')
+        orig_factor = factor(orig_nnmf)
+        sim_factor = factor(sim_nnmf)
+        nn1 = nn1.fit(orig_factor)
+        distances, indices = nn1.kneighbors(sim_factor)
+        dim = len(orig_factor)
+        heatmap = np.zeros([dim] * 2)
+        heatmap[:] = np.nan
+        for i, (d, j) in enumerate(zip(distances, indices)):
+            heatmap[i, j] = d
+        cmap.set_bad('w', 1.)
+        plt.pcolor(np.ma.array(heatmap, mask=np.isnan(heatmap)), cmap=cmap, vmin=0, vmax=1)
+        plt.colorbar()
 
     def createFigure():
         return plt.figure(figsize=(8.27, 11.69), dpi=100)  # A4 format
@@ -489,6 +533,20 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
             plt.subplot(2, 1, 2)
             plotFunc(sim_stats, real=False)
             saveFigure(fig, pdf)
+
+        fig = createFigure()
+        plt.title("Cosine similarity of image components")
+        plt.xlabel("Components of original data")
+        plt.ylabel("Components of simulated data")
+        plotComponentSimilarity(getImageComponents)
+        saveFigure(fig, pdf)
+
+        fig = createFigure()
+        plt.title("Cosine similarity of spectral components")
+        plt.xlabel("Components of original data")
+        plt.ylabel("Components of simulated data")
+        plotComponentSimilarity(getSpectralComponents)
+        saveFigure(fig, pdf)
 
 class ComputeSimilarityMetrics(luigi.Task):
     config = luigi.DictParameter()
