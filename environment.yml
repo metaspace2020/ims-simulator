@@ -26,4 +26,5 @@ dependencies:
     - wheezy.template
     - luigi
     - pyyaml
+    - matplotlib-venn
     - git+https://github.com/alexandrovteam/pyimzML.git@494f52e1519fcf820bf89f19f28344ddea45d3cf # TODO: package on PyPI

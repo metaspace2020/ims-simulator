@@ -4,6 +4,7 @@ import pandas as pd
 import yaml  # for parsing config file
 
 from os.path import splitext, basename, expanduser
+from collections import defaultdict
 import subprocess
 import tempfile
 import shutil
@@ -395,8 +396,8 @@ class RunFullPipeline(SimulationTask):
         imzml = self.config['imzml']
         instrument = self.config['instrument']
         db = self.config['annotation']['database']
-        if 'grountruth' in self.config:
-            groundtruth_fn = self.config['grountruth']
+        if 'groundtruth' in self.config:
+            groundtruth_fn = self.config['groundtruth']
         else:
             groundtruth_fn = None
 
@@ -439,12 +440,14 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
             simulation_config = unfreeze(simulatedDataConfig(self.config))
             yaml.dump(simulation_config, f)
 
-def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
+def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
     import numpy as np
     from matplotlib.backends.backend_pdf import PdfPages
     import matplotlib.pyplot as plt
     from matplotlib.cm import viridis as cmap
+    from matplotlib_venn import venn3
     from sklearn.neighbors import NearestNeighbors
+    from pyMSpec.pyisocalc import pyisocalc
 
     plt.ioff()
 
@@ -471,6 +474,8 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
     orig_nnmf = loadNNMF(orig['nnmf'])
     sim_nnmf = loadNNMF(sim['nnmf'])
 
+    bin_size = 0.01
+
     def getImageComponents(nnmf):
         return nnmf['W'].T
 
@@ -478,7 +483,7 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
                                    min(sim_nnmf['mz_axis'])),
                                max(max(orig_nnmf['mz_axis']),
                                    max(sim_nnmf['mz_axis'])),
-                               0.01)
+                               bin_size)
 
     def getSpectralComponents(nnmf):
         axis_len = len(common_mz_axis)
@@ -487,6 +492,13 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
         for i, h in enumerate(nnmf['H']):
             result[i, :] = np.bincount(indices, h, minlength=axis_len)[:axis_len]
         return result
+
+    def plotImageComponent(nnmf, i):
+        plt.imshow(nnmf['W'][:, i].reshape(nnmf['shape']), cmap=cmap)
+        plt.colorbar()
+
+    def plotSpectralComponent(nnmf, i):
+        plt.plot(nnmf['mz_axis'], nnmf['H'][i])
 
     def plotSparsityHistogram(stats, real=True):
         count, logdist = stats['sparsityHist'][:2]
@@ -514,8 +526,45 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
         for i, (d, j) in enumerate(zip(distances, indices)):
             heatmap[i, j] = d
         cmap.set_bad('w', 1.)
-        plt.pcolor(np.ma.array(heatmap, mask=np.isnan(heatmap)), cmap=cmap, vmin=0, vmax=1)
+        plt.pcolor(np.ma.array(heatmap, mask=np.isnan(heatmap)),
+                   cmap=cmap, vmin=0, vmax=1)
         plt.colorbar()
+
+    def plotVennDiagram(fdr_threshold=0.2):
+        layers = pickle.load(open(layers_fn))
+
+        # sum formulas should all be normalized so that C5HNS3 is the same as H1S3N1C5
+        def normalized(sf):
+            return str(pyisocalc.parseSumFormula(sf))
+
+        sim_layer_formulas = defaultdict(set)
+
+        for layer in layers['layers_list']:
+            for ion in layers['layers_list'][layer]['sf_list']:
+                sf, adduct = ion['sf_a'].split('+')  # FIXME: negative mode
+                sf = normalized(sf)
+                sim_layer_formulas['+' + adduct].add(sf)
+
+        def top_results(df, threshold, adduct):
+            """
+            results with estimated FDR < threshold and positive MSM
+            """
+            fdr = df['fdr'] if 'fdr' in df else df['est_fdr']
+            return df[(fdr < threshold) & (df['adduct'] == adduct) &
+                      (df['img'] * df['iso'] * df['moc'] > 0)]
+
+        for i, adduct in enumerate(orig['fdr'].keys()):
+            plt.subplot(len(orig['fdr']), 1, i + 1)
+            plt.title("Annotation overlap for {} (FDR threshold = {})"
+                      .format(adduct, fdr_threshold))
+            orig_res = pd.read_csv(orig['fdr'][adduct])
+            sim_res = pd.read_csv(sim['fdr'][adduct])
+            db = set(orig_res['formula'])
+
+            orig_top = set(top_results(orig_res, fdr_threshold, adduct)['formula'])
+            sim_top = set(top_results(sim_res, fdr_threshold, adduct)['formula'])
+            venn3([orig_top, sim_top, sim_layer_formulas[adduct] & db],
+                  ("Orig. annotations", "Sim. annotations", "Sim. groundtruth & DB"))
 
     def createFigure():
         return plt.figure(figsize=(8.27, 11.69), dpi=100)  # A4 format
@@ -526,6 +575,21 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
         plt.close(fig)
 
     with PdfPages(output_filename) as pdf:
+        n_components = len(orig_nnmf['H'])
+        per_page = 5
+        for i in range(0, n_components / per_page + 1):
+            n_plots = min(per_page, n_components - i * per_page)
+            if n_plots < 1:
+                break
+            fig = createFigure()
+            for j in range(n_plots):
+                plt.subplot(n_plots, 2, 2 * j + 1)
+                plotImageComponent(orig_nnmf, per_page * i + j)
+                plt.subplot(n_plots, 2, 2 * j + 2)
+                plt.xticks(rotation=45)
+                plotSpectralComponent(orig_nnmf, per_page * i + j)
+            saveFigure(fig, pdf)
+
         for plotFunc in [plotSparsityHistogram, plotIntensityHistogram]:
             fig = createFigure()
             plt.subplot(2, 1, 1)
@@ -535,17 +599,21 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, output_filename):
             saveFigure(fig, pdf)
 
         fig = createFigure()
-        plt.title("Cosine similarity of image components")
+        plt.subplot(2, 1, 1)
+        plt.title("Cosine distances between image components")
         plt.xlabel("Components of original data")
         plt.ylabel("Components of simulated data")
         plotComponentSimilarity(getImageComponents)
-        saveFigure(fig, pdf)
 
-        fig = createFigure()
-        plt.title("Cosine similarity of spectral components")
+        plt.subplot(2, 1, 2)
+        plt.title("Cosine distances between spectral components (rebinned with step {})".format(bin_size))
         plt.xlabel("Components of original data")
         plt.ylabel("Components of simulated data")
         plotComponentSimilarity(getSpectralComponents)
+        saveFigure(fig, pdf)
+
+        fig = createFigure()
+        plotVennDiagram(0.2)
         saveFigure(fig, pdf)
 
 class ComputeSimilarityMetrics(luigi.Task):
@@ -554,6 +622,7 @@ class ComputeSimilarityMetrics(luigi.Task):
     def requires(self):
         return {'original': RunFullPipeline(self.config),
                 'sim_config': CreateAnnotationConfigForSimulatedData(self.config),
+                'layers': AssignMolecules(self.config),
                 'simulated': RunFullPipeline(simulatedDataConfig(self.config))}
 
     def output(self):
@@ -561,7 +630,7 @@ class ComputeSimilarityMetrics(luigi.Task):
 
     def run(self):
         generateReport(self.input()['original'].fn, self.input()['simulated'].fn,
-                       self.output().fn)
+                       self.input()['layers'].fn, self.output().fn)
 
 def _ordered_dict(loader, node):
     loader.flatten_mapping(node)
