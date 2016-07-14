@@ -12,6 +12,14 @@ import sys
 import os
 import pickle
 
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
+from matplotlib.cm import viridis as cmap
+from matplotlib_venn import venn3
+from sklearn.neighbors import NearestNeighbors
+from pyMSpec.pyisocalc import pyisocalc
+
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
                  "+Cu,+Zn,+Ga,+Ge,+As,+Se,+Br,+Kr,+Rb,+Sr,+Y,+Zr,"
@@ -374,7 +382,7 @@ def simulatedDataConfig(config):
         imzml=simulatedDataFilename(config),
         annotation=config['annotation'],
         instrument=config['instrument'],
-        grountruth=GenerateGroundtruth(config).output_filename(),
+        groundtruth=GenerateGroundtruth(config).output_filename(),
         factorization=config['factorization'],
         noise=config['noise']
     )
@@ -416,7 +424,8 @@ class RunFullPipeline(SimulationTask):
     def run(self):
         paths = {
             'stats': self.input()['stats'].fn,
-            'nnmf': self.input()['nnmf'].fn
+            'nnmf': self.input()['nnmf'].fn,
+            'imzml': self.config['imzml']
         }
 
         fdr = self.input()['fdr']
@@ -441,14 +450,6 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
             yaml.dump(simulation_config, f)
 
 def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
-    import numpy as np
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.pyplot as plt
-    from matplotlib.cm import viridis as cmap
-    from matplotlib_venn import venn3
-    from sklearn.neighbors import NearestNeighbors
-    from pyMSpec.pyisocalc import pyisocalc
-
     plt.ioff()
 
     orig = yaml.load(open(orig_yaml_fn))
@@ -614,6 +615,23 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
 
         fig = createFigure()
         plotVennDiagram(0.2)
+        saveFigure(fig, pdf)
+
+        def plotNormRatios(a, b):
+            plt.imshow(a / b, cmap=cmap, vmin=0, vmax=1)
+            plt.colorbar()
+        norms = np.load(open(sim['imzml'] + '.norms'))
+
+        fig = createFigure()
+        plt.subplot(3, 1, 1)
+        plt.title("||real - simulated||_2 / ||real||_2")
+        plotNormRatios(norms['diff'], norms['real'])
+        plt.subplot(3, 1, 2)
+        plt.title("||groundtruth||_2 / ||simulated||_2")
+        plotNormRatios(norms['groundtruth'], norms['simulated'])
+        plt.subplot(3, 1, 3)
+        plt.title("||noise||_2 / ||simulated||_2")
+        plotNormRatios(norms['noise'], norms['simulated'])
         saveFigure(fig, pdf)
 
 class ComputeSimilarityMetrics(luigi.Task):

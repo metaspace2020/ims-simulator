@@ -26,6 +26,11 @@ class NoiseGenerator(object):
             self._W = data['W'].reshape((nx, ny, -1))
             self._H = data['H']
             self._mz_axis = data['mz_axis']
+        self._norm_real = {}
+        self._norm_simulated = {}
+        self._norm_groundtruth = {}
+        self._norm_noise = {}
+        self._norm_diff = {}
         self._coords = {}
         for i, coords in enumerate(self._imzml.coordinates):
             self._coords[(coords[0], coords[1])] = i
@@ -50,6 +55,9 @@ class NoiseGenerator(object):
     def _getRealSpectrum(self, x, y):
         return self._imzml.getspectrum(self._coords[(x, y)])
 
+    def _norm(self, intensities):
+        return np.linalg.norm(intensities)
+
     def generateNoise(self, x, y):
         real_spectrum = self._getRealSpectrum(x, y)
         real_mzs, real_intensities = map(np.array, real_spectrum)
@@ -62,6 +70,7 @@ class NoiseGenerator(object):
         bins = np.digitize(real_mzs, self._mz_bins)
         n_bins = len(self._mz_bins)
         binned_real_intensities = np.bincount(bins, real_intensities, n_bins)
+        self._norm_real[(x, y)] = self._norm(binned_real_intensities)
         binned_approx_intensities = self._W[x, y, :].dot(self._H)
         noise = np.abs(binned_real_intensities - binned_approx_intensities)
         # FIXME: avoid duplicating noise
@@ -77,17 +86,40 @@ class NoiseGenerator(object):
         mult = spec[1].max() if len(spec[1]) > 0 else 1
         intensities = np.array(p.abundances) * mult
 
+        x, y = coords[:2]
+        limit = min(self._getRealSpectrum(*coords)[1])
+
         noise_mzs, noise_intensities = self.generateNoise(*coords)
+        self._norm_noise[(x, y)] = self._norm(noise_intensities[noise_intensities > limit])
+        self._norm_groundtruth[(x, y)] = self._norm(intensities[intensities > limit])
+        self._norm_simulated[(x, y)] = self._norm_noise[(x, y)] + self._norm_groundtruth[(x, y)]
+        self._norm_diff[(x, y)] = abs(self._norm_simulated[(x, y)] - self._norm_real[(x, y)])
         mzs = np.concatenate([mzs, noise_mzs])
         intensities = np.concatenate([intensities, noise_intensities])
 
-        limit = min(self._getRealSpectrum(*coords)[1])
         detectable = np.where(intensities > limit)[0]
         mzs = mzs[detectable]
         intensities = intensities[detectable]
 
         order = mzs.argsort()
         return mzs[order], intensities[order]
+
+    def saveStatistics(self, filename):
+        def toRect(d):
+            xs = [k[0] for k in d]
+            ys = [k[1] for k in d]
+            img = np.zeros((max(xs) + 1, max(ys) + 1))
+            for k in d:
+                img[k[0], k[1]] = d[k]
+            return img
+
+        with open(filename, "w+") as f:
+            np.savez(f,
+                     real=toRect(self._norm_real),
+                     simulated=toRect(self._norm_simulated),
+                     groundtruth=toRect(self._norm_groundtruth),
+                     noise=toRect(self._norm_noise),
+                     diff=toRect(self._norm_diff))
 
 ng = NoiseGenerator(args.nmf, args.layers, args.real)
 
@@ -97,3 +129,5 @@ with ImzMLWriter(args.output, mz_dtype=np.float32) as w:
     for i, coords in enumerate(imzml_sim.coordinates):
         noisy_mzs, noisy_intensities = ng.addNoise(imzml_sim.getspectrum(i), coords)
         w.addSpectrum(noisy_mzs, noisy_intensities, coords)
+
+ng.saveStatistics(args.output + ".norms")
