@@ -4,7 +4,6 @@ import pandas as pd
 import yaml  # for parsing config file
 
 from os.path import splitext, basename, expanduser
-from collections import defaultdict
 import subprocess
 import tempfile
 import shutil
@@ -18,7 +17,6 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import viridis as cmap
 from matplotlib_venn import venn3
 from sklearn.neighbors import NearestNeighbors
-from pyMSpec.pyisocalc import pyisocalc
 
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
@@ -202,7 +200,7 @@ class ComputeFDR(CmdlineTask):
 
     def requires(self):
         return {
-            'target_results': GetAnnotationsForAdduct(self.imzml_fn, self.instrument, self.molecular_db, self.adduct, self.groundtruth_fn),
+            'target_results': GetAnnotationsForAdduct(self.imzml_fn, self.instrument, self.molecular_db, self.adduct, ''),  # , self.groundtruth_fn),
             'decoy_results': RunAnnotation(self.imzml_fn, self.instrument, self._decoy_molecular_db())
         }
 
@@ -449,7 +447,7 @@ class CreateAnnotationConfigForSimulatedData(luigi.Task):
             simulation_config = unfreeze(simulatedDataConfig(self.config))
             yaml.dump(simulation_config, f)
 
-def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
+def generateReport(orig_yaml_fn, sim_yaml_fn, groundtruth_fn, output_filename):
     plt.ioff()
 
     orig = yaml.load(open(orig_yaml_fn))
@@ -531,20 +529,9 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
                    cmap=cmap, vmin=0, vmax=1)
         plt.colorbar()
 
-    def plotVennDiagram(fdr_threshold=0.2):
-        layers = pickle.load(open(layers_fn))
-
-        # sum formulas should all be normalized so that C5HNS3 is the same as H1S3N1C5
-        def normalized(sf):
-            return str(pyisocalc.parseSumFormula(sf))
-
-        sim_layer_formulas = defaultdict(set)
-
-        for layer in layers['layers_list']:
-            for ion in layers['layers_list'][layer]['sf_list']:
-                sf, adduct = ion['sf_a'].split('+')  # FIXME: negative mode
-                sf = normalized(sf)
-                sim_layer_formulas['+' + adduct].add(sf)
+    def plotVennDiagram(fdr_threshold):
+        groundtruth = pd.read_csv(groundtruth_fn, names=['formula', 'adduct'])
+        sim_layer_formulas = groundtruth.groupby('adduct')
 
         def top_results(df, threshold, adduct):
             """
@@ -564,7 +551,8 @@ def generateReport(orig_yaml_fn, sim_yaml_fn, layers_fn, output_filename):
 
             orig_top = set(top_results(orig_res, fdr_threshold, adduct)['formula'])
             sim_top = set(top_results(sim_res, fdr_threshold, adduct)['formula'])
-            venn3([orig_top, sim_top, sim_layer_formulas[adduct] & db],
+            venn3([orig_top, sim_top,
+                   set(sim_layer_formulas.get_group(adduct)['formula']) & db],
                   ("Orig. annotations", "Sim. annotations", "Sim. groundtruth & DB"))
 
     def createFigure():
@@ -640,7 +628,7 @@ class ComputeSimilarityMetrics(luigi.Task):
     def requires(self):
         return {'original': RunFullPipeline(self.config),
                 'sim_config': CreateAnnotationConfigForSimulatedData(self.config),
-                'layers': AssignMolecules(self.config),
+                'groundtruth': GenerateGroundtruth(self.config),
                 'simulated': RunFullPipeline(simulatedDataConfig(self.config))}
 
     def output(self):
@@ -648,7 +636,7 @@ class ComputeSimilarityMetrics(luigi.Task):
 
     def run(self):
         generateReport(self.input()['original'].fn, self.input()['simulated'].fn,
-                       self.input()['layers'].fn, self.output().fn)
+                       self.input()['groundtruth'].fn, self.output().fn)
 
 def _ordered_dict(loader, node):
     loader.flatten_mapping(node)
