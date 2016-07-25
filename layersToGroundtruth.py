@@ -4,6 +4,8 @@ from pyMSpec.pyisocalc import pyisocalc
 import argparse
 import cPickle
 
+from adduct import splitSumFormula
+
 parser = argparse.ArgumentParser(description="assign molecules to peaks of NMF spectral components")
 parser.add_argument('input', type=str, help="file with layers produced by assignMolecules.py")
 parser.add_argument('output', type=str, help="text file containing all groundtruth molecules")
@@ -19,6 +21,6 @@ with open(args.input) as f:
 with open(args.output, "w+") as f:
     for layer in layers['layers_list']:
         for ion in layers['layers_list'][layer]['sf_list']:
-            sf, adduct = ion['sf_a'].split('+')
+            sf, adduct = splitSumFormula(ion['sf_a'])
             sf = normalized(sf)
-            f.write("{},+{}\n".format(sf, adduct))
+            f.write("{},{}\n".format(sf, adduct))

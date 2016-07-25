@@ -8,23 +8,27 @@ import pickle
 from collections import OrderedDict
 
 from pyMSpec.pyisocalc import pyisocalc
-from cpyMSpec import IsotopePattern, centroidize
-
+from cpyMSpec import IsotopePattern
 from mz_axis import Instrument
-
+from adduct import signedAdduct, isValidAdduct, adductCharge
 import argparse
 
 parser = argparse.ArgumentParser(description="assign molecules to peaks of NMF spectral components")
 parser.add_argument('input', type=str, help="input file produced by NNMF.py")
 parser.add_argument('output', type=str, help="output file with images and molecules (.pkl)")
+parser.add_argument('adducts', type=str, nargs='+', help='space-separated list of target adducts', default=['+H', '+K', '+Na'])
 parser.add_argument('--instrument', type=str, default='orbitrap', choices=['orbitrap', 'fticr'])
 parser.add_argument('--res200', type=float, default=140000)
 parser.add_argument('--db', type=str, help="text file with desired molecules, one per line")
 parser.add_argument("--dynrange", type=float, default=1000, help="dynamic range: influences how many peaks in each component will be annotated")
 
 args = parser.parse_args()
+print args
 instr = Instrument(args)
+adducts = map(signedAdduct, args.adducts)
 assert(args.dynrange > 1)
+for adduct in adducts:
+    assert(isValidAdduct(adduct))
 detection_limit = 1.0 / args.dynrange
 
 output_filename = os.path.join(os.getcwd(), os.path.expanduser(args.output))
@@ -68,13 +72,49 @@ def _combine_results(dfs):
 
     return df[['em', 'error', 'mf', 'ppm', 'unsat', 'adduct']]
 
-# FIXME: make it work for negative mode
-def search_mz_candidates_pfg(mass, adducts, ppm_limit=5, charge=1):
+def pfg_cmdline(element_count_ranges, mass, ppm_limit):
+    return "OMP_NUM_THREADS=2 PFG -m {} -t {} ".format(mass, ppm_limit) +\
+           " ".join("--{} {}-{}".format(el, r[0], r[1])
+                    for el, r in element_count_ranges.iteritems()) + " -r 'lewis'"
+
+def subtractAdduct(mass, adduct, charge):
+    """
+    Returns mass of the uncharged molecule without the adduct.
+    """
+    if adduct[0] != '-':
+        return mass - IsotopePattern(adduct).charged(charge).masses[0]
+    else:
+        return mass + IsotopePattern(adduct[1:]).charged(charge).masses[0]
+
+ELEMENT_COUNT_LIMITS = {
+    'C': (0, 100),
+    'H': (0, 100),
+    'N': (0, 10),
+    'O': (0, 10),
+    'S': (0, 5),
+    'P': (0, 5)
+}
+
+def adjustLimits(limits, adduct):
+    lims = limits
+    if adduct[0] == '-':
+        # ensure that for a negative adduct the element is present in all results
+        lims = limits.copy()
+        add = adduct[1:]
+        if add in limits:
+            lims[add] = (lims[add][0] + 1, lims[add][1] + 1)
+        else:
+            lims[adduct[1:]] = (1, 1)
+    # for positive adducts just keep the limits as is
+    return lims
+
+def search_mz_candidates_pfg(mass, adducts, ppm_limit=5):
     dfs = []
     for adduct in adducts:
-        mass_ = mass - IsotopePattern(adduct).charged(charge).masses[0]
-        cmd_line = ("OMP_NUM_THREADS=2 PFG -m {} -t {} " +
-                    "--C 0-100 --H 0-100 --N 0-10 --O 0-10 --S 0-5 --P 0-5 -r 'lewis'").format(mass_, ppm_limit)
+        charge = adductCharge(adduct)
+        mass_ = subtractAdduct(mass, adduct, charge)
+        limits = adjustLimits(ELEMENT_COUNT_LIMITS, adduct)
+        cmd_line = pfg_cmdline(limits, mass_, ppm_limit)
         _ = subprocess.check_output(cmd_line, shell=True)
         results = open("result.txt").readlines()[1:]
         results = zip(*[s.split() for s in results])
@@ -150,7 +190,7 @@ class AnnotatedSpectrum(object):
         return np.searchsorted(self.orig_mzs, assigned_mzs)
 
 class MoleculeAssigner(object):
-    def __init__(self, target_database):
+    def __init__(self, target_database, adducts):
 
         # keep track of the already assigned sum formulas
         # so that if the same m/z appears in different components,
@@ -160,6 +200,8 @@ class MoleculeAssigner(object):
         # scoring the candidates for a given m/z incorporates our desire
         # to have some of the selected sum formulas from a predefined database;
         self._target_db = target_database
+
+        self._adducts = adducts
 
     def normalize_sf(self, sf):
         return str(pyisocalc.parseSumFormula(sf))
@@ -173,9 +215,9 @@ class MoleculeAssigner(object):
         return 1
 
     def _centroids(self, row):
-        p = IsotopePattern("{}+{}".format(row.mf, row.adduct))
+        p = IsotopePattern("{}{}".format(row.mf, row.adduct))
         p = p.centroids(instr.resolutionAt(p.masses[0]))
-        p = p.charged(1).trimmed(5)
+        p = p.charged(adductCharge(row.adduct)).trimmed(5)
         return p
 
     def fit_spectrum(self, mzs_c, ppms, ints_c, detection_limit, max_peaks=500):
@@ -185,7 +227,7 @@ class MoleculeAssigner(object):
 
         while annotated_spec.top()[1] >= detection_limit:
             mz, ppm, v = annotated_spec.top()
-            hits = search_mz_candidates_pfg(mz, ['H', 'Na', 'K'], ppm_limit=ppm)
+            hits = search_mz_candidates_pfg(mz, self._adducts, ppm_limit=ppm)
             if len(hits) == 0:
                 annotated_spec.pop()
                 continue
@@ -208,7 +250,7 @@ class MoleculeAssigner(object):
 
         return annotated_spec
 
-assigner = MoleculeAssigner(db)
+assigner = MoleculeAssigner(db, adducts)
 
 spec_fit = []
 db_percentage = []
@@ -233,7 +275,7 @@ for ii in range(len(spec_fit)):
     layers['layers_list'][ii]['image'] = W[:, ii].reshape(shape)[1:, 1:]
     layers['layers_list'][ii]['sf_list'] = []
     for sf in spec_fit[ii].sf_list:
-        sf_a = "{}+{}".format(sf[1]['mf'], sf[1]['adduct'])
+        sf_a = "{}{}".format(sf[1]['mf'], sf[1]['adduct'])
         mult = sf[0]  # intensity
         layers['layers_list'][ii]['sf_list'].append({"sf_a": sf_a, "mult": mult})
 

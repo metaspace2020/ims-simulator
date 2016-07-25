@@ -7,7 +7,7 @@
     dynrange: 1000
     database:
       sum_formulas: "~/metabolomics/chebi_metabolites.txt"
-      adducts:      # FIXME: negative adducts probably don't work yet
+      adducts:
         - "+H"
         - "+K"
         - "+Na"

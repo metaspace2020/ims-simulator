@@ -18,6 +18,8 @@ from matplotlib.cm import viridis as cmap
 from matplotlib_venn import venn3
 from sklearn.neighbors import NearestNeighbors
 
+from adduct import signedAdduct
+
 DECOY_ADDUCTS = ("+He,+Li,+Be,+B,+C,+N,+O,+F,+Ne,+Mg,+Al,+Si,+P,"
                  "+S,+Cl,+Ar,+Ca,+Sc,+Ti,+V,+Cr,+Mn,+Fe,+Co,+Ni,"
                  "+Cu,+Zn,+Ga,+Ge,+As,+Se,+Br,+Kr,+Rb,+Sr,+Y,+Zr,"
@@ -294,12 +296,14 @@ class AssignMolecules(SimulationTask):
         return "layers"
 
     def program_args(self):
+        # FIXME: replace scripts with classes, because bash syntax gets in the way
         return [self.internal_script("assignMolecules.py"),
                 self.input().fn, self.output_filename(),
                 "--instrument", self.instrument['type'],
                 "--res200", self.instrument['res200'],
                 "--dynrange", self.config['annotation'].get('dynrange', 1000),
-                "--db", self.molecular_db['sum_formulas_fn']]
+                "--db", self.molecular_db['sum_formulas_fn'],
+                "--"] + list(self.molecular_db['adducts'])
 
     def after_run(self):
         with open(self.output_filename(), "r") as f:
@@ -652,7 +656,7 @@ def readConfig(filename):
     cfg = config.get_wrapped()
     cfg['imzml'] = expanduser(config['imzml'])
     cfg['annotation']['database'].get_wrapped()['sum_formulas_fn'] = expanduser(config['annotation']['database']['sum_formulas'])
-    cfg['annotation']['database'].get_wrapped()['adducts'] = tuple(cfg['annotation']['database']['adducts'])
+    cfg['annotation']['database'].get_wrapped()['adducts'] = tuple(map(signedAdduct, cfg['annotation']['database']['adducts']))
     if 'extra' in cfg['annotation']:
         cfg['annotation'].get_wrapped()['extra'] = tuple(cfg['annotation']['extra'])
     cfg['annotation']['database'].get_wrapped()['is_decoy'] = False

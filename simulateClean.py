@@ -3,6 +3,7 @@ from cpyMSpec import IsotopePattern
 from pyimzml.ImzMLWriter import ImzMLWriter
 
 from mz_axis import Instrument
+from adduct import splitSumFormula, adductCharge
 
 import numpy as np
 
@@ -40,7 +41,9 @@ class SpectrumGenerator(object):
             self.isotope_patterns[i] = []
             for sf in layer['sf_list']:
                 data = {}
-                data['p'] = p = IsotopePattern(sf['sf_a']).charged(1)
+                _, a = splitSumFormula(sf['sf_a'])
+                charge = adductCharge(a)
+                data['p'] = p = IsotopePattern(sf['sf_a']).charged(charge)
                 data['resolution'] = instr.resolutionAt(p.masses[0])
                 data['l'] = np.searchsorted(self.mz_axis, min(p.masses) - 0.5, 'l')
                 data['r'] = np.searchsorted(self.mz_axis, max(p.masses) + 1, 'r')
