@@ -19,6 +19,7 @@ dependencies:
   - PFG=0.1
   - matplotlib
   - scikit-learn
+  - libgcc
   - pip:
     - cpyImagingMSpec==0.0.5
     - cpyMSpec==0.1.4
