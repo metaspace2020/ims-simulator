@@ -67,7 +67,7 @@ class CmdlineTask(luigi.Task):
         return False
 
     def internal_script(self, name):
-        return os.path.join(os.path.dirname(__file__), name)
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
 
     def before_run(self):
         pass
