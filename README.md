@@ -10,9 +10,10 @@ Scripts for simulating high-resolution imaging mass spectrometry datasets.
 
 ## How to get a simulated .imzML from a real .imzML
 
-1. Copy `example_config.yaml` and edit it as needed. The most important bit is to specify the .imzML filename.
-2. Run `python pipeline.py <your config.yaml>` and wait. In about an hour it should successfully finish.
-3. If the run completes without errors, you will find a file named `report_<config hash>.pdf` along with the generated `imzML` file. It contains some useful metrics for comparing simulated and original datasets.
+1. Create a working directory where all generated files will be kept (`mkdir <dirname> && cd <dirname>`).
+2. Copy `example_config.yaml` to the newly created directory and edit it as needed. The most important bit is to specify the .imzML filename.
+3. Run `python <path to ims-simulator>/pipeline.py <your config.yaml>` from the directory and wait. In about an hour it should successfully finish.
+4. If the run completes without errors, you will find a file named `report_<config hash>.pdf` along with the generated `imzML` file. It contains some useful metrics for comparing simulated and original datasets.
 
 # License
 
