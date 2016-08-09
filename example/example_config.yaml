@@ -1,8 +1,8 @@
 ---
+  imzml: "~/python_codebase/ims_simulator/ims-simulator/example/12hour_5_210_centroid.imzML"  
   instrument:
     type: "fticr"   # currently 'fticr' and 'orbitrap' are supported
-    res200: 250000  # resolution at m/z = 200
-  imzml: "~/python_codebase/ims_simulator/ims-simulator/example/12hour_5_210_centroid.imzML"
+    res200: 250000  # resolving power at m/z = 200
   annotation:       # parameters for assigning molecules to peaks
     dynrange: 1000
     database:
