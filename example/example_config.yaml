@@ -11,7 +11,7 @@
         - "+H"
         - "+K"
         - "+Na"
-    extra:          # user-provided list of ions
+    extra:          # user-provided list of ions forced to be present
       - sf: "C6H15N2O"
         adduct: "+K"
         intensity: 80    # maximum is 100
