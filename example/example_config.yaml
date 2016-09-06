@@ -1,0 +1,26 @@
+---
+  imzml: "~/python_codebase/ims_simulator/ims-simulator/example/12hour_5_210_centroid.imzML"  
+  instrument:
+    type: "fticr"   # currently 'fticr' and 'orbitrap' are supported
+    res200: 250000  # resolving power at m/z = 200
+  annotation:       # parameters for assigning molecules to peaks
+    dynrange: 1000
+    database:
+      sum_formulas: "~/python_codebase/ims_simulator/ims-simulator/example/chebi_metabolites.txt"
+      adducts:
+        - "+H"
+        - "+K"
+        - "+Na"
+    extra:          # user-provided list of ions forced to be present
+      - sf: "C6H15N2O"
+        adduct: "+K"
+        intensity: 80    # maximum is 100
+        component: 0     # components are counted starting from zero
+      - sf: "C10H20NO3"
+        adduct: "+H"
+        intensity: 30
+        component: 2
+  factorization:
+    rank: 30        # how many layers to generate
+  noise:
+    inflation: 1    # computed noise intensities are multiplied by this factor
