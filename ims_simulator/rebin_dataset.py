@@ -60,10 +60,11 @@ def get_instrument_model(instrument_type, res200):
     return Instrument(foo)
 
 
-def do_rebinning(filename_imzb, instrument_type, res200):
+def do_rebinning(filename_imzb, instrument_type, res200, mz_range=[]):
     imzb = open_dataset(filename_imzb)
-    mz_range = get_mz_range(imzb)
-    K = 100 #random hardcoded parameter?
+    if mz_range == []:
+        mz_range = get_mz_range(imzb)
+    K = 20 #in principle can be calcualted from system memory
     instrument = get_instrument_model(instrument_type, res200)
     mz_axis = get_mz_axis(mz_range[0], mz_range[1], instrument, 1.0)
     image_intensities = parallel_rebin(K, mz_axis, imzb)
@@ -78,7 +79,7 @@ def do_and_save_rebinning(input_file_imzb, output_file_np, instrument_type, res2
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="rebin a centroided dataset")
     parser.add_argument('input_file_imzb', type=str, help="input file in .imzb format")
-    parser.add_argument('output_file_np', type=str, help="output file (numpy-readable NMF)")
+    parser.add_argument('output_file_np', type=str, help="output file (numpy-readable)")
     parser.add_argument('--instrument_type', type=str, default='orbitrap', choices=['orbitrap', 'fticr'])
     parser.add_argument('--res200', type=float, default=140000)
     args = parser.parse_args()
