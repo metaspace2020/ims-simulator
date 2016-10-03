@@ -12,11 +12,14 @@ import os
 import pickle
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 from matplotlib.cm import viridis as cmap
 from matplotlib_venn import venn3
 from sklearn.neighbors import NearestNeighbors
+import logging
 
 from adduct import signedAdduct
 
@@ -138,6 +141,7 @@ class ConvertImzMLToImzb(CmdlineTask):
     def program_args(self):
         return ['ims', 'convert',
                 self.imzml_fn, self.output_filename()]
+
 
 class RunAnnotation(CmdlineTask):
     imzml_fn = luigi.Parameter()
