@@ -16,13 +16,6 @@ import sys
 
 
 def nnmf_calculation(arr, arr_idx, rank):
-
-    arr_pos = np.array(arr[arr_idx])
-    print arr_pos.shape
-
-    cols = []
-    r = rank
-
     def nnls_frob(x, anchors):
         ncols = x.shape[1]
         x_sel = np.array(anchors)
@@ -36,6 +29,10 @@ def nnmf_calculation(arr, arr_idx, rank):
 
         return result
 
+    arr_pos = np.asarray(arr[arr_idx])
+    print arr_pos.shape
+    cols = []
+    r = rank
     # treat images as vectors (flatten them)
     x = arr_pos.reshape((arr_pos.shape[0], -1)).T
 
@@ -75,37 +72,20 @@ def nnmf_calculation(arr, arr_idx, rank):
 
 
 def do_nnmf(input_filename, output, instrument, res200, rank, args):
-    '''instrument = Instrument(args)
-    imzb = ImzbReader(input_filename)
+    """
+    Parameters
+    ----------
+    input_filename
+    output
+    instrument
+    res200
+    rank
+    args
 
-    mz_range = (imzb.min_mz - 0.1, imzb.max_mz + 0.1)
-    assert mz_range[0] > 0
-    assert mz_range[1] > 1
+    Returns
+    -------
 
-    mz_axis = generate_mz_axis(mz_range[0], mz_range[1], instrument, 1.0)
-    print "Number of m/z bins:", len(mz_axis)
-
-    def get_mz_images(mz_axis_chunk):
-        imgs = np.zeros((len(mz_axis_chunk), imzb.height, imzb.width))
-        for n, (mz, ppm) in enumerate(mz_axis_chunk):
-            img = imzb.get_mz_image(mz, ppm)
-            img[img < 0] = 0
-            perc = np.percentile(img, 99)
-            img[img > perc] = perc
-            imgs[n, :, :] = img
-        return imgs
-
-    K = 100
-
-    mz_axis_chunks = list(partition_all(K, mz_axis))
-
-    # create dask array manually using tasks
-    tasks = {('x', i, 0, 0): (get_mz_images, mz_chunk) for i, mz_chunk in enumerate(mz_axis_chunks)}
-
-    chunks_mz = [len(c) for c in mz_axis_chunks]
-    chunks_x = (imzb.height, )
-    chunks_y = (imzb.width, )
-    arr = da.Array(tasks, 'x', chunks=(chunks_mz, chunks_x, chunks_y), dtype=float)'''
+    """
     from rebin_dataset import do_rebinning
     arr, mz_axis = do_rebinning(input_filename, instrument, res200)
     print arr.shape
@@ -114,66 +94,8 @@ def do_nnmf(input_filename, output, instrument, res200, rank, args):
     N_bright = 500
     bright_images_pos = image_intensities.argsort()[::-1][:N_bright]
     mz_axis_pos = np.array(mz_axis)[bright_images_pos]
-
-    '''
-    arr_pos = np.array(arr[bright_images_pos])
-    print "Selected top", N_bright, "brightest images for NNMF"
-    print arr_pos.shape
-
-    cols = []
-    r = rank
-
-    def nnls_frob(x, anchors):
-        ncols = x.shape[1]
-        x_sel = np.array(anchors)
-        # print "projection"
-        result = np.zeros((x_sel.shape[1], ncols))
-
-        # apply NNLS to chunks so as to avoid loading all m/z images into RAM
-        for chunk in partition_all(100, range(ncols)):
-            residuals = np.array(x[:, chunk])
-            result[:, chunk] = nnlsm_blockpivot(x_sel, residuals)[0]
-
-        return result
-
-    # treat images as vectors (flatten them)
-    x = arr_pos.reshape((arr_pos.shape[0], -1)).T
-
-    print "Running non-negative matrix factorization"
-
-    # apply XRay algorithm
-    # ('Fast conical hull algorithms for near-separable non-negative matrix factorization' by Kumar et. al., 2012)
-    R = x
-    while len(cols) < r:
-        # print "detection"
-        p = np.random.random(x.shape[0])
-        scores = (R * x).sum(axis=0)
-        scores /= p.T.dot(x)
-        scores = np.array(scores)
-        scores[cols] = -1
-        best_col = np.argmax(scores)
-        assert best_col not in cols
-        cols.append(best_col)
-        print "picked {}/{} columns".format(len(cols), r)
-
-        H = nnls_frob(x, x[:, cols])
-        R = x - np.dot(x[:, cols], H)
-
-        if len(cols) > 0 and len(cols) % 5 == 0:
-            residual_error = np.linalg.norm(R, 'fro') / np.linalg.norm(x, 'fro')
-            print "relative error is", residual_error
-
-    W = np.array(x[:, cols])
-
-    residual_error = np.linalg.norm(R, 'fro') / np.linalg.norm(x, 'fro')
-    print "Finished column picking, relative error is", residual_error
-
-    print "Projecting all m/z bin images on the obtained basis..."
-    H_full = nnls_frob(arr.reshape((arr.shape[0], -1)).T,
-                       arr_pos.reshape((arr_pos.shape[0], -1))[cols, :].T)
-    '''
+    print 'Computing nnmf'
     W, H_full, H, R, residual_error = nnmf_calculation(arr, bright_images_pos, rank)
-
     print "Computing noise statistics..."
     noise_stats = {'prob': [], 'sqrt_median': [], 'sqrt_std': []}
     percent_complete = 5.0
