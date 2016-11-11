@@ -80,7 +80,7 @@ class SpectrumGenerator(object):
             self._addEnvelope(result, i, x, y)
 
         # don't store zeross
-        nnz = result > (1e-6 * result.max())
+        nnz = result > (1e-6 * result.max()) #Q: should be related to dynamic range?
         return (self.mz_axis[nnz], result[nnz])
 
 with open(args.input) as f:

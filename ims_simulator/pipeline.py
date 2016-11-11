@@ -12,11 +12,14 @@ import os
 import pickle
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 from matplotlib.cm import viridis as cmap
 from matplotlib_venn import venn3
 from sklearn.neighbors import NearestNeighbors
+import logging
 
 from adduct import signedAdduct
 
@@ -138,6 +141,7 @@ class ConvertImzMLToImzb(CmdlineTask):
     def program_args(self):
         return ['ims', 'convert',
                 self.imzml_fn, self.output_filename()]
+
 
 class RunAnnotation(CmdlineTask):
     imzml_fn = luigi.Parameter()
@@ -353,7 +357,7 @@ class SimulateNoisyDataset(SimulationTask):
         return "sim.imzML"
 
     def program_args(self):
-        return [self.internal_script("addNoise.py"),
+        return [self.internal_script("addNoiseDistribution.py"),
                 self.imzml_fn,
                 self.input()[0].fn,
                 self.input()[1].fn,
@@ -665,4 +669,5 @@ def readConfig(filename):
 if __name__ == '__main__':
     config = readConfig(sys.argv[1])
     print config
-    luigi.build([ComputeSimilarityMetrics(config)], local_scheduler=True)
+    #luigi.build([ComputeSimilarityMetrics(config)], local_scheduler=False)
+    luigi.build([SimulateNoisyDataset(config)], local_scheduler=False)

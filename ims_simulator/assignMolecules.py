@@ -88,7 +88,7 @@ def subtractAdduct(mass, adduct, charge):
 
 ELEMENT_COUNT_LIMITS = {
     'C': (0, 100),
-    'H': (0, 100),
+    'H': (0, 200),
     'N': (0, 10),
     'O': (0, 10),
     'S': (0, 5),

@@ -18,7 +18,7 @@ def generate_mz_axis(mz_min, mz_max, instrument, step_size=5):
     while mz < mz_max:
         fwhm = mz / instrument.resolutionAt(mz)
         step = step_size * fwhm
-        ppm = 1e6 * step / (2.0 * mz + step)
+        ppm = 1e6 * step / (2.0 * mz + step) # don't understand this calculation mass accuracy_FWHM usually defined as 1e6*fwhm/m
         mz_axis.append((mz + step/2, ppm))
         mz += step
     return mz_axis
